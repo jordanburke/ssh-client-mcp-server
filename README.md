@@ -1,9 +1,9 @@
-# SSH MCP Server
+# SSH Client MCP Server
 
-[![License](https://img.shields.io/github/license/tufantunc/ssh-mcp)](./LICENSE)
+[![License](https://img.shields.io/github/license/jordanburke/ssh-client-mcp-server)](./LICENSE)
 [![NPM Version](https://img.shields.io/npm/v/ssh-mcp)](https://www.npmjs.com/package/ssh-mcp)
 
-**SSH MCP Server** is a local Model Context Protocol (MCP) server that exposes SSH control for Linux and Windows systems, enabling LLMs and other MCP clients to execute shell commands securely via SSH.
+**SSH Client MCP Server** is a local Model Context Protocol (MCP) server that exposes SSH control for Linux and Windows systems, enabling LLMs and other MCP clients to execute shell commands securely via SSH.
 
 ## Contents
 
@@ -17,8 +17,8 @@
 
 ## Quick Start
 
-- [Install](#installation) SSH MCP Server
-- [Configure](#configuration) SSH MCP Server
+- [Install](#installation) SSH Client MCP Server
+- [Configure](#configuration) SSH Client MCP Server
 - [Set up](#client-setup) your MCP Client (e.g. Claude Desktop, Cursor, etc)
 - Execute remote shell commands on your Linux or Windows server via natural language
 
@@ -37,12 +37,12 @@
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/tufantunc/ssh-mcp.git
-   cd ssh-mcp
+   git clone https://github.com/jordanburke/ssh-client-mcp-server.git
+   cd ssh-client-mcp-server
    ```
 2. **Install dependencies:**
    ```bash
-   npm install
+   pnpm install
    ```
 
 ## Client Setup
@@ -58,10 +58,10 @@ You can configure Claude Desktop to use this MCP Server.
 ```commandline
 {
     "mcpServers": {
-        "ssh-mcp": {
+        "ssh-client-mcp-server": {
             "command": "npx",
             "args": [
-                "ssh-mcp",
+                "ssh-client-mcp-server",
                 "-y",
                 "--",
                 "--host=1.2.3.4",
@@ -80,13 +80,13 @@ You can configure Claude Desktop to use this MCP Server.
 You can use the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) for visual debugging of this MCP Server.
 
 ```sh
-npm run inspect
+pnpm run inspect
 ```
 
 ## Disclaimer
 
-SSH MCP Server is provided under the [MIT License](./LICENSE). Use at your own risk. This project is not affiliated with or endorsed by any SSH or MCP provider.
+SSH Client MCP Server is provided under the [MIT License](./LICENSE). Use at your own risk. This project is not affiliated with or endorsed by any SSH or MCP provider.
 
 ## Support
 
-If you find SSH MCP Server helpful, consider starring the repository or contributing! Pull requests and feedback are welcome. 
+If you find SSH Client MCP Server helpful, consider starring the repository or contributing! Pull requests and feedback are welcome. 

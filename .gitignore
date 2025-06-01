@@ -1,3 +1,7 @@
+.idea
+
+### Node template
+
 # Logs
 logs
 *.log
@@ -104,12 +108,6 @@ dist
 .temp
 .cache
 
-# vitepress build output
-**/.vitepress/dist
-
-# vitepress cache directory
-**/.vitepress/cache
-
 # Docusaurus cache and generated files
 .docusaurus
 
@@ -135,5 +133,3 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-# Ignore build output
-build/
