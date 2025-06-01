@@ -10,5 +10,5 @@ export default defineConfig({
     splitting: false,
     sourcemap: false,
     dts: false,
-    onSuccess: 'chmod +x build/*.js'
+    onSuccess: 'chmod +x dist/*.js'
 })

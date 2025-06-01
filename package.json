@@ -6,15 +6,15 @@
   "author": "Jordan Burke <jordan.burke@gmail.com>",
   "type": "module",
   "bin": {
-    "ssh-client-mcp-server": "build/index.js"
+    "ssh-client-mcp-server": "dist/index.js"
   },
   "scripts": {
     "prepare": "pnpm run build",
     "build": "tsup",
-    "inspect": "pnpx @modelcontextprotocol/inspector node build/index.js"
+    "inspect": "pnpx @modelcontextprotocol/inspector node dist/index.js"
   },
   "files": [
-    "build"
+    "dist"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
