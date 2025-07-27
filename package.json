@@ -1,7 +1,7 @@
 {
   "name": "ssh-client-mcp-server",
   "license": "MIT",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "A SSH client MCP Server for Linux/OSX and Windows via Model Context Protocol.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
   "type": "module",
@@ -11,22 +11,42 @@
   "scripts": {
     "prepare": "pnpm run build",
     "build": "tsup",
-    "inspect": "pnpx @modelcontextprotocol/inspector node dist/index.js"
+    "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js",
+    "dev": "pnpm build && pnpm inspect",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\"",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "prepublishOnly": "pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
   },
   "files": [
     "dist"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.17.0",
     "ssh2": "^1.16.0",
-    "zod": "^3.25.46"
+    "zod": "^4.0.10"
   },
   "devDependencies": {
-    "@types/node": "^20.17.57",
+    "@eslint/js": "^9.32.0",
+    "@types/node": "^20.19.9",
     "@types/ssh2": "^1.15.5",
+    "@typescript-eslint/eslint-plugin": "^8.38.0",
+    "@typescript-eslint/parser": "^8.38.0",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "eslint": "^9.32.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.3",
+    "prettier": "^3.6.2",
     "shx": "^0.4.0",
     "tsup": "^8.5.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   },
-  "packageManager": "pnpm@10.11.0+sha512.6540583f41cc5f628eb3d9773ecee802f4f9ef9923cc45b69890fb47991d4b092964694ec3a4f738a420c918a333062c8b925d312f42e4f0c263eb603551f977"
+  "packageManager": "pnpm@10.14.0-0+sha512.2cd47a0cbf5f1d1de7693a88307a0ede5be94e0d3b34853d800ee775efbea0650cb562b77605ec80bc8d925f5cd27c4dfe8bb04d3a0b76090784c664450d32d6"
 }
