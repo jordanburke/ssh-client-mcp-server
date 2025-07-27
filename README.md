@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/github/license/jordanburke/ssh-client-mcp-server)](./LICENSE)
 [![NPM Version](https://img.shields.io/npm/v/ssh-mcp)](https://www.npmjs.com/package/ssh-mcp)
+[![smithery badge](https://smithery.ai/badge/@jordanburke/ssh-client-mcp-server)](https://smithery.ai/server/@jordanburke/ssh-client-mcp-server)
 
 **SSH Client MCP Server** is a local Model Context Protocol (MCP) server that exposes SSH control for Linux and Windows systems, enabling LLMs and other MCP clients to execute shell commands securely via SSH.
 
@@ -34,6 +35,16 @@
 - `exec`: Execute a shell command on the remote server
 
 ## Installation
+
+### Installing via Smithery
+
+To install ssh-client-mcp-server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@jordanburke/ssh-client-mcp-server):
+
+```bash
+npx -y @smithery/cli install @jordanburke/ssh-client-mcp-server --client claude
+```
+
+### Manual Installation
 
 1. **Clone the repository:**
    ```bash
@@ -89,4 +100,4 @@ SSH Client MCP Server is provided under the [MIT License](./LICENSE). Use at you
 
 ## Support
 
-If you find SSH Client MCP Server helpful, consider starring the repository or contributing! Pull requests and feedback are welcome. 
+If you find SSH Client MCP Server helpful, consider starring the repository or contributing! Pull requests and feedback are welcome.

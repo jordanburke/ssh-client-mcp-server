@@ -1,0 +1,32 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config)=>({command:'node',args:['dist/index.js',`--host=${config.host}`,`--user=${config.user}`].concat(config.port? [`--port=${config.port}`]:[]).concat(config.password? [`--password=${config.password}`]:[]).concat(config.key? [`--key=${config.key}`]:[])})
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - host
+      - user
+    properties:
+      host:
+        type: string
+      user:
+        type: string
+      port:
+        type: number
+        default: 22
+      password:
+        type: string
+      key:
+        type: string
+  exampleConfig:
+    host: 1.2.3.4
+    user: root
+    port: 22
+    password: examplePassword
+    key: /path/to/key
