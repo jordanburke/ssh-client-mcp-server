@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
-import { Client as SSHClient } from "ssh2"
-import { z } from "zod"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import { type CallToolResult, ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
+import { Client as SSHClient, type ConnectConfig } from "ssh2"
+import { z } from "zod"
 
-// Example usage: node build/index.js --host=1.2.3.4 --port=22 --user=root --password=pass --key=path/to/key
+// Example usage: node dist/index.js --host=1.2.3.4 --port=22 --user=root --password=pass --key=path/to/key
 function parseArgv() {
   const args = process.argv.slice(2)
   const config: Record<string, string> = {}
@@ -28,7 +28,7 @@ const PASSWORD = argvConfig.password
 const KEY = argvConfig.key
 
 function validateConfig(config: Record<string, string>) {
-  const errors = []
+  const errors: string[] = []
   if (!config.host) errors.push("Missing required --host")
   if (!config.user) errors.push("Missing required --user")
   if (config.port && isNaN(Number(config.port))) errors.push("Invalid --port")
@@ -39,14 +39,18 @@ function validateConfig(config: Record<string, string>) {
 
 validateConfig(argvConfig)
 
-const server = new McpServer({
-  name: "SSH MCP Server",
-  version: "1.0.5",
-  capabilities: {
-    resources: {},
-    tools: {},
+const server = new McpServer(
+  {
+    name: "SSH MCP Server",
+    version: "1.0.5",
   },
-})
+  {
+    capabilities: {
+      resources: {},
+      tools: {},
+    },
+  },
+)
 
 server.tool(
   "exec",
@@ -59,7 +63,7 @@ server.tool(
     if (typeof command !== "string" || !command.trim()) {
       throw new McpError(ErrorCode.InternalError, "Command must be a non-empty string.")
     }
-    const sshConfig: any = {
+    const sshConfig: ConnectConfig = {
       host: HOST,
       port: PORT,
       username: USER,
@@ -73,35 +77,15 @@ server.tool(
       }
       const result = await execSshCommand(sshConfig, command)
       return result
-    } catch (err: any) {
-      // Wrap unexpected errors
+    } catch (err) {
       if (err instanceof McpError) throw err
-      throw new McpError(ErrorCode.InternalError, `Unexpected error: ${err?.message || err}`)
+      const message = err instanceof Error ? err.message : String(err)
+      throw new McpError(ErrorCode.InternalError, `Unexpected error: ${message}`)
     }
   },
 )
 
-async function execSshCommand(
-  sshConfig: any,
-  command: string,
-): Promise<{
-  [x: string]: unknown
-  content: (
-    | { [x: string]: unknown; type: "text"; text: string }
-    | {
-        [x: string]: unknown
-        type: "image"
-        data: string
-        mimeType: string
-      }
-    | { [x: string]: unknown; type: "audio"; data: string; mimeType: string }
-    | {
-        [x: string]: unknown
-        type: "resource"
-        resource: any
-      }
-  )[]
-}> {
+async function execSshCommand(sshConfig: ConnectConfig, command: string): Promise<CallToolResult> {
   return new Promise((resolve, reject) => {
     const conn = new SSHClient()
     conn.on("ready", () => {

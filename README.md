@@ -48,12 +48,12 @@
 ## Client Setup
 
 You can configure Claude Desktop to use this MCP Server.
-   - `host`: Hostname or IP of the Linux or Windows server
-   - `port`: SSH port (default: 22)
-   - `user`: SSH username
-   - `password`: SSH password (or use `key` for key-based auth) (optional)
-   - `key`: Path to private SSH key (optional)
 
+- `host`: Hostname or IP of the Linux or Windows server
+- `port`: SSH port (default: 22)
+- `user`: SSH username
+- `password`: SSH password (or use `key` for key-based auth) (optional)
+- `key`: Path to private SSH key (optional)
 
 ```commandline
 {
@@ -89,4 +89,4 @@ SSH Client MCP Server is provided under the [MIT License](./LICENSE). Use at you
 
 ## Support
 
-If you find SSH Client MCP Server helpful, consider starring the repository or contributing! Pull requests and feedback are welcome. 
+If you find SSH Client MCP Server helpful, consider starring the repository or contributing! Pull requests and feedback are welcome.

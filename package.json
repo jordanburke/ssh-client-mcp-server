@@ -5,48 +5,50 @@
   "description": "A SSH client MCP Server for Linux/OSX and Windows via Model Context Protocol.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "bin": {
     "ssh-client-mcp-server": "dist/index.js"
   },
-  "scripts": {
-    "prepare": "pnpm run build",
-    "build": "tsup",
-    "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js",
-    "dev": "pnpm build && pnpm inspect",
-    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\"",
-    "lint": "eslint \"src/**/*.{ts,tsx}\"",
-    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui",
-    "prepublishOnly": "pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build"
-  },
   "files": [
+    "lib",
     "dist"
   ],
+  "scripts": {
+    "validate": "ts-builds validate",
+    "format": "ts-builds format",
+    "format:check": "ts-builds format:check",
+    "lint": "ts-builds lint",
+    "lint:check": "ts-builds lint:check",
+    "typecheck": "ts-builds typecheck",
+    "test": "ts-builds test",
+    "test:watch": "ts-builds test:watch",
+    "test:coverage": "ts-builds test:coverage",
+    "test:ui": "ts-builds test:ui",
+    "build": "ts-builds build",
+    "dev": "ts-builds dev",
+    "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js",
+    "prepublishOnly": "pnpm validate"
+  },
+  "prettier": "ts-builds/prettier",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ssh2": "^1.17.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.4",
-    "@types/node": "^20.19.39",
+    "@types/node": "^24.12.2",
     "@types/ssh2": "^1.15.5",
-    "@typescript-eslint/eslint-plugin": "^8.58.2",
-    "@typescript-eslint/parser": "^8.58.2",
-    "@vitest/coverage-v8": "^3.2.4",
-    "@vitest/ui": "^3.2.4",
-    "eslint": "^9.39.4",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.5",
-    "prettier": "^3.8.3",
-    "shx": "^0.4.0",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "ts-builds": "^2.7.0",
+    "tsdown": "^0.21.9"
   },
   "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
 }
