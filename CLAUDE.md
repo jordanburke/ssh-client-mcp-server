@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SSH Client MCP Server is a Model Context Protocol (MCP) server that exposes SSH capabilities to LLMs and MCP clients. It's a single-file TypeScript application that provides secure remote shell command execution via SSH.
 
+Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) — a functional MCP framework that wraps FastMCP behind a backend abstraction and adds telemetry, introspection (`soma_health`, `soma_capabilities`, `soma_connections`), and an optional dashboard.
+
 ## Development Commands
 
 This project uses [`ts-builds`](https://github.com/jordanburke/ts-builds) to delegate all tooling. Scripts in `package.json` call `ts-builds <cmd>`.
@@ -21,16 +23,27 @@ This project uses [`ts-builds`](https://github.com/jordanburke/ts-builds) to del
 
 ### Core Components
 
-- **Single entry point**: `src/index.ts` contains the entire MCP server implementation
-- **MCP Tool**: `exec` tool for executing shell commands on remote servers
-- **SSH Client**: Uses `ssh2` library for SSH connections with password or key authentication
-- **Configuration**: Command-line argument parsing for SSH connection parameters
+- **Single entry point**: `src/index.ts` wires up the server via `createServer()` and registers a single `exec` tool
+- **MCP Tool**: `exec` — runs a shell command on the remote host, returns stdout as a string. stderr becomes a `UserError`
+- **SSH Client**: Uses `ssh2` library; password or key authentication
+- **Configuration**: CLI arg parsing for SSH connection parameters (host/port/user/password/key)
+- **Transport**: stdio (single `server.start({ transportType: "stdio" })` call)
 
 ### Key Dependencies
 
-- `@modelcontextprotocol/sdk` - MCP server framework
+- `somamcp` - MCP framework (wraps FastMCP; provides `createServer`, `UserError`, telemetry, introspection)
 - `ssh2` - SSH client implementation
 - `zod` - Schema validation for tool parameters
+
+### Introspection
+
+somamcp auto-registers these tools alongside `exec`:
+
+- `soma_health` — server uptime, status, session count
+- `soma_capabilities` — registered tools / resources / prompts
+- `soma_connections` — gateway connection status (unused here)
+
+Disable with `enableIntrospection: false` in `createServer()` options if you want a strict 1-tool surface.
 
 ## Configuration
 

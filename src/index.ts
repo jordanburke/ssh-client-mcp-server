@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { type CallToolResult, ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js"
+import { createServer, UserError } from "somamcp"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 import { z } from "zod"
 
@@ -39,77 +37,52 @@ function validateConfig(config: Record<string, string>) {
 
 validateConfig(argvConfig)
 
-const server = new McpServer(
-  {
-    name: "SSH MCP Server",
-    version: "1.0.5",
-  },
-  {
-    capabilities: {
-      resources: {},
-      tools: {},
-    },
-  },
-)
+const server = createServer({
+  name: "ssh-client-mcp-server",
+  version: "1.2.0",
+  instructions: "Execute shell commands on a remote host over SSH.",
+})
 
-server.tool(
-  "exec",
-  "Execute a shell command on the remote SSH server and return the output.",
-  {
-    command: z.string().describe("Shell command to execute on the remote SSH server"),
-  },
-  async ({ command }) => {
-    // Sanitize command input
-    if (typeof command !== "string" || !command.trim()) {
-      throw new McpError(ErrorCode.InternalError, "Command must be a non-empty string.")
-    }
+server.addTool({
+  name: "exec",
+  description: "Execute a shell command on the remote SSH server and return the output.",
+  parameters: z.object({
+    command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
+  }),
+  execute: async ({ command }) => {
     const sshConfig: ConnectConfig = {
       host: HOST,
       port: PORT,
       username: USER,
     }
-    try {
-      if (PASSWORD) {
-        sshConfig.password = PASSWORD
-      } else if (KEY) {
-        const fs = await import("fs/promises")
-        sshConfig.privateKey = await fs.readFile(KEY, "utf8")
-      }
-      const result = await execSshCommand(sshConfig, command)
-      return result
-    } catch (err) {
-      if (err instanceof McpError) throw err
-      const message = err instanceof Error ? err.message : String(err)
-      throw new McpError(ErrorCode.InternalError, `Unexpected error: ${message}`)
+    if (PASSWORD) {
+      sshConfig.password = PASSWORD
+    } else if (KEY) {
+      const fs = await import("fs/promises")
+      sshConfig.privateKey = await fs.readFile(KEY, "utf8")
     }
+    return await execSshCommand(sshConfig, command)
   },
-)
+})
 
-async function execSshCommand(sshConfig: ConnectConfig, command: string): Promise<CallToolResult> {
+async function execSshCommand(sshConfig: ConnectConfig, command: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const conn = new SSHClient()
     conn.on("ready", () => {
       conn.exec(command, (err, stream) => {
         if (err) {
-          reject(new McpError(ErrorCode.InternalError, `SSH exec error: ${err.message}`))
+          reject(new UserError(`SSH exec error: ${err.message}`))
           conn.end()
           return
         }
         let stdout = ""
         let stderr = ""
-        stream.on("close", (code: number, _signal: string) => {
+        stream.on("close", (code: number) => {
           conn.end()
           if (stderr) {
-            reject(new McpError(ErrorCode.InternalError, `Error (code ${code}):\n${stderr}`))
+            reject(new UserError(`Error (code ${code}):\n${stderr}`))
           } else {
-            resolve({
-              content: [
-                {
-                  type: "text",
-                  text: stdout,
-                },
-              ],
-            })
+            resolve(stdout)
           }
         })
         stream.on("data", (data: Buffer) => {
@@ -121,16 +94,22 @@ async function execSshCommand(sshConfig: ConnectConfig, command: string): Promis
       })
     })
     conn.on("error", (err) => {
-      reject(new McpError(ErrorCode.InternalError, `SSH connection error: ${err.message}`))
+      reject(new UserError(`SSH connection error: ${err.message}`))
     })
     conn.connect(sshConfig)
   })
 }
 
 async function main() {
-  const transport = new StdioServerTransport()
-  await server.connect(transport)
+  await server.start({ transportType: "stdio" })
   console.error("SSH MCP Server running on stdio")
+
+  const shutdown = async () => {
+    await server.stop()
+    process.exit(0)
+  }
+  process.on("SIGINT", () => void shutdown())
+  process.on("SIGTERM", () => void shutdown())
 }
 
 main().catch((error) => {

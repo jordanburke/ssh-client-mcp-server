@@ -27,11 +27,12 @@
 - MCP-compliant server exposing SSH capabilities
 - Execute shell commands on remote Linux and Windows systems
 - Secure authentication via password or SSH key
-- Built with TypeScript and the official MCP SDK
+- Built with TypeScript on [`somamcp`](https://github.com/sapientsai/SomaMCP) — a functional MCP framework over FastMCP with built-in telemetry and introspection
 
 ### Tools
 
 - `exec`: Execute a shell command on the remote server
+- `soma_health`, `soma_capabilities`, `soma_connections`: introspection tools auto-registered by somamcp
 
 ## Installation
 
