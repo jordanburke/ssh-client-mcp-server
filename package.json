@@ -2,8 +2,34 @@
   "name": "ssh-client-mcp-server",
   "license": "MIT",
   "version": "1.3.0",
-  "description": "A SSH client MCP Server for Linux/OSX and Windows via Model Context Protocol.",
+  "description": "MCP server that exposes SSH command execution to LLMs. Built on SomaMCP with functional config parsing (functype), path expansion (~, $VAR), and OS-user fallback.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
+  "homepage": "https://github.com/jordanburke/ssh-client-mcp-server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jordanburke/ssh-client-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jordanburke/ssh-client-mcp-server/issues"
+  },
+  "keywords": [
+    "mcp",
+    "ssh",
+    "ssh2",
+    "model-context-protocol",
+    "claude",
+    "anthropic",
+    "llm",
+    "remote-shell",
+    "somamcp",
+    "fastmcp",
+    "functype",
+    "typescript",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
