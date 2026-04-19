@@ -1,7 +1,7 @@
 {
   "name": "ssh-client-mcp-server",
   "license": "MIT",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "A SSH client MCP Server for Linux/OSX and Windows via Model Context Protocol.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
   "type": "module",
@@ -40,6 +40,8 @@
   },
   "prettier": "ts-builds/prettier",
   "dependencies": {
+    "functype": "^0.60.0",
+    "functype-os": "^0.60.0",
     "somamcp": "^1.0.5",
     "ssh2": "^1.17.0",
     "zod": "^4.3.6"

@@ -1,72 +1,16 @@
 #!/usr/bin/env node
 
+import { Option } from "functype"
 import { createServer, UserError } from "somamcp"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 import { z } from "zod"
 
-// Example usage: node dist/index.js --host=1.2.3.4 --port=22 --user=root --password=pass --key=path/to/key
-function parseArgv() {
-  const args = process.argv.slice(2)
-  const config: Record<string, string> = {}
-  for (const arg of args) {
-    const match = arg.match(/^--([^=]+)=(.*)$/)
-    if (match) {
-      config[match[1]] = match[2]
-    }
-  }
-  return config
-}
+import { effectiveUser, parseArgv, resolveAuth, validateConfig } from "./config.js"
 
-const argvConfig = parseArgv()
+// Example: node dist/index.js --host=1.2.3.4 --port=22 --user=root --password=pass --key=~/.ssh/id_rsa
 
-const HOST = argvConfig.host
-const PORT = argvConfig.port ? parseInt(argvConfig.port) : 22
-const USER = argvConfig.user
-const PASSWORD = argvConfig.password
-const KEY = argvConfig.key
-
-function validateConfig(config: Record<string, string>) {
-  const errors: string[] = []
-  if (!config.host) errors.push("Missing required --host")
-  if (!config.user) errors.push("Missing required --user")
-  if (config.port && isNaN(Number(config.port))) errors.push("Invalid --port")
-  if (errors.length > 0) {
-    throw new Error("Configuration error:\n" + errors.join("\n"))
-  }
-}
-
-validateConfig(argvConfig)
-
-const server = createServer({
-  name: "ssh-client-mcp-server",
-  version: "1.2.0",
-  instructions: "Execute shell commands on a remote host over SSH.",
-})
-
-server.addTool({
-  name: "exec",
-  description: "Execute a shell command on the remote SSH server and return the output.",
-  parameters: z.object({
-    command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
-  }),
-  execute: async ({ command }) => {
-    const sshConfig: ConnectConfig = {
-      host: HOST,
-      port: PORT,
-      username: USER,
-    }
-    if (PASSWORD) {
-      sshConfig.password = PASSWORD
-    } else if (KEY) {
-      const fs = await import("fs/promises")
-      sshConfig.privateKey = await fs.readFile(KEY, "utf8")
-    }
-    return await execSshCommand(sshConfig, command)
-  },
-})
-
-async function execSshCommand(sshConfig: ConnectConfig, command: string): Promise<string> {
-  return new Promise((resolve, reject) => {
+const execSshCommand = (sshConfig: ConnectConfig, command: string): Promise<string> =>
+  new Promise((resolve, reject) => {
     const conn = new SSHClient()
     conn.on("ready", () => {
       conn.exec(command, (err, stream) => {
@@ -98,9 +42,50 @@ async function execSshCommand(sshConfig: ConnectConfig, command: string): Promis
     })
     conn.connect(sshConfig)
   })
-}
 
 async function main() {
+  const argv = parseArgv(process.argv.slice(2))
+
+  validateConfig(argv).fold(
+    (err) => {
+      console.error(err)
+      process.exit(1)
+    },
+    () => undefined,
+  )
+
+  const { host } = argv
+  const user = effectiveUser(argv).orThrow(new Error("user unavailable after validation"))
+  const port = Option(argv.port).map(Number).orElse(22)
+  const password = Option(argv.password)
+  const keyPath = Option(argv.key)
+
+  const authResult = await resolveAuth(password, keyPath)
+  const authConfig = authResult.fold<Partial<ConnectConfig>>(
+    (err) => {
+      console.error(err)
+      process.exit(1)
+    },
+    (cfg) => cfg,
+  )
+
+  const sshConfig: ConnectConfig = { host, port, username: user, ...authConfig }
+
+  const server = createServer({
+    name: "ssh-client-mcp-server",
+    version: "1.2.0",
+    instructions: "Execute shell commands on a remote host over SSH.",
+  })
+
+  server.addTool({
+    name: "exec",
+    description: "Execute a shell command on the remote SSH server and return the output.",
+    parameters: z.object({
+      command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
+    }),
+    execute: async ({ command }) => execSshCommand(sshConfig, command),
+  })
+
   await server.start({ transportType: "stdio" })
   console.error("SSH MCP Server running on stdio")
 

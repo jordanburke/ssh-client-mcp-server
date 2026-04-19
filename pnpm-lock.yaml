@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      functype:
+        specifier: ^0.60.0
+        version: 0.60.0
+      functype-os:
+        specifier: ^0.60.0
+        version: 0.60.0(functype@0.60.0)
       somamcp:
         specifier: ^1.0.5
         version: 1.0.5
@@ -1305,6 +1311,12 @@ packages:
 
   functype-os@0.4.2:
     resolution: {integrity: sha512-WV5g41M8L8XLrAN0fg9+jJVrOJrF36Tur43LOCKb8YPY6W72aGW6Xycpt6fiWECtWRD0+4+m1m2X3QPYwQf+Vg==}
+    engines: {node: '>=18.17.0'}
+    peerDependencies:
+      functype: '>=0.54.0'
+
+  functype-os@0.60.0:
+    resolution: {integrity: sha512-0OubV7O/R3idDa+m1Nu8xOwmEBeyAk8jl2i50rw2/u9yHtb7ieXYAVTXg5TQEVjNEU/Cek39088oxUdSq+yhhQ==}
     engines: {node: '>=18.17.0'}
     peerDependencies:
       functype: '>=0.54.0'
@@ -3451,6 +3463,10 @@ snapshots:
   functype-os@0.4.2(functype@0.57.3):
     dependencies:
       functype: 0.57.3
+
+  functype-os@0.60.0(functype@0.60.0):
+    dependencies:
+      functype: 0.60.0
 
   functype@0.57.3: {}
 

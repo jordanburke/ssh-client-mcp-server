@@ -32,6 +32,11 @@ This project uses [`ts-builds`](https://github.com/jordanburke/ts-builds) to del
 ### Key Dependencies
 
 - `somamcp` - MCP framework (wraps FastMCP; provides `createServer`, `UserError`, telemetry, introspection)
+- `functype` - Functional types (`Option`, `Either`, `List`) used for argv parsing and config validation
+- `functype-os` - OS helpers:
+  - `Path.expand` — `~`, `$VAR`/`${VAR}`, and absolute-path resolution in one call, returns `Either<PathError, string>`
+  - `Fs.readFile` — returns `TaskResult<string>` (async `Either`-like); key errors surface at startup
+  - `Platform.userInfo()` — when `--user` is omitted, falls back to the OS user (whoami-style)
 - `ssh2` - SSH client implementation
 - `zod` - Schema validation for tool parameters
 
