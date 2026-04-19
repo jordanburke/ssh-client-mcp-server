@@ -19,10 +19,12 @@ const execSshCommand = (sshConfig: ConnectConfig, command: string): Promise<stri
           conn.end()
           return
         }
-        let stdout = ""
-        let stderr = ""
+        const stdoutChunks: Buffer[] = []
+        const stderrChunks: Buffer[] = []
         stream.on("close", (code: number) => {
           conn.end()
+          const stdout = Buffer.concat(stdoutChunks).toString()
+          const stderr = Buffer.concat(stderrChunks).toString()
           if (stderr) {
             reject(new UserError(`Error (code ${code}):\n${stderr}`))
           } else {
@@ -30,10 +32,10 @@ const execSshCommand = (sshConfig: ConnectConfig, command: string): Promise<stri
           }
         })
         stream.on("data", (data: Buffer) => {
-          stdout += data.toString()
+          stdoutChunks.push(data)
         })
         stream.stderr.on("data", (data: Buffer) => {
-          stderr += data.toString()
+          stderrChunks.push(data)
         })
       })
     })
