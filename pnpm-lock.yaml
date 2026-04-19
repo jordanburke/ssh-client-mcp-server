@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       functype:
-        specifier: ^0.60.0
-        version: 0.60.0
+        specifier: ^0.60.2
+        version: 0.60.2
       functype-os:
         specifier: ^0.60.0
-        version: 0.60.0(functype@0.60.0)
+        version: 0.60.0(functype@0.60.2)
       somamcp:
         specifier: ^1.0.5
         version: 1.0.5
@@ -1315,8 +1315,8 @@ packages:
     peerDependencies:
       functype: '>=0.54.0'
 
-  functype@0.60.0:
-    resolution: {integrity: sha512-AkgKkqfiEjQnw8f+ENq/KXH3Jcb775azrFkaLhRu3acvwmzRAwBpkcTes28yMiakESXFtiqCdszX+sq+Rylg4A==}
+  functype@0.60.2:
+    resolution: {integrity: sha512-BGUHcK2TC3gCr4xxYXtbrQZk7p5FdxUOnaINe1CZ1yvh9ixcRQThjKDqobgJZ5+FU3LeXI0W/HXStZE7R3bTmQ==}
     hasBin: true
 
   fuse.js@7.3.0:
@@ -3445,16 +3445,16 @@ snapshots:
 
   function-bind@1.1.2: {}
 
-  functype-log@0.60.0(functype@0.60.0):
+  functype-log@0.60.0(functype@0.60.2):
     dependencies:
-      functype: 0.60.0
+      functype: 0.60.2
       loglayer: 9.1.0
 
-  functype-os@0.60.0(functype@0.60.0):
+  functype-os@0.60.0(functype@0.60.2):
     dependencies:
-      functype: 0.60.0
+      functype: 0.60.2
 
-  functype@0.60.0: {}
+  functype@0.60.2: {}
 
   fuse.js@7.3.0: {}
 
@@ -4047,8 +4047,8 @@ snapshots:
     dependencies:
       '@modelcontextprotocol/sdk': 1.29.0(zod@4.3.6)
       fastmcp: 4.0.0
-      functype: 0.60.0
-      functype-log: 0.60.0(functype@0.60.0)
+      functype: 0.60.2
+      functype-log: 0.60.0(functype@0.60.2)
       hono: 4.12.14
       zod: 4.3.6
     transitivePeerDependencies:
@@ -4149,8 +4149,8 @@ snapshots:
       eslint-plugin-functype: 2.2.1(eslint@10.2.1)
       eslint-plugin-prettier: 5.5.5(eslint-config-prettier@10.1.8(eslint@10.2.1))(eslint@10.2.1)(prettier@3.8.3)
       eslint-plugin-simple-import-sort: 13.0.0(eslint@10.2.1)
-      functype: 0.60.0
-      functype-os: 0.60.0(functype@0.60.0)
+      functype: 0.60.2
+      functype-os: 0.60.0(functype@0.60.2)
       globals: 17.5.0
       prettier: 3.8.3
       rimraf: 6.1.3
