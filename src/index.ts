@@ -61,8 +61,12 @@ async function main() {
   const port = Option(argv.port).map(Number).orElse(22)
   const password = Option(argv.password)
   const keyPath = Option(argv.key)
+  const keyEnvVar = Option(argv["key-env"])
+  const useAgent = Option(argv.agent)
+    .map((v) => v === "true" || v === "1" || v === "yes")
+    .orElse(false)
 
-  const authResult = await resolveAuth(password, keyPath)
+  const authResult = await resolveAuth({ password, keyPath, keyEnvVar, useAgent })
   const authConfig = authResult.fold<Partial<ConnectConfig>>(
     (err) => {
       console.error(err)

@@ -30,7 +30,7 @@ No global install required — `npx` fetches and runs the latest published versi
 ## Features
 
 - **Single `exec` tool** — runs a shell command on the remote host, returns stdout. stderr surfaces as a structured error.
-- **Auth** — password or SSH private key (or defer to the SSH agent when no credentials are provided).
+- **Four auth modes** — password, key file, key from environment variable (e.g. injected by [envpkt](https://github.com/jordanburke/envpkt), Vault, Doppler), or `SSH_AUTH_SOCK` (system ssh-agent, 1Password, Bitwarden Desktop, KeePassXC).
 - **Smart path expansion** — `--key` supports `~`, `$VAR`, `${VAR}`, and relative paths via [`functype-os`](https://github.com/jordanburke/functype-os). Unresolved variables fail fast with a typed error.
 - **OS-user fallback** — `--user` defaults to the current OS username when omitted.
 - **Fail-fast auth** — the SSH key is loaded and validated at server startup, not on the first `exec` call.
@@ -73,15 +73,41 @@ pnpm build
 
 The server reads SSH connection info from CLI flags:
 
-| Flag         | Required | Default     | Description                                                                    |
-| ------------ | -------- | ----------- | ------------------------------------------------------------------------------ |
-| `--host`     | yes      | —           | Hostname or IP of the remote SSH server.                                       |
-| `--user`     | no       | OS username | SSH username. Falls back to the local OS user (`whoami`) when omitted.         |
-| `--port`     | no       | `22`        | SSH port.                                                                      |
-| `--password` | no\*     | —           | SSH password.                                                                  |
-| `--key`      | no\*     | —           | Path to a private SSH key. Supports `~`, `$VAR`, `${VAR}`, and relative paths. |
+| Flag         | Required | Default     | Description                                                                                       |
+| ------------ | -------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| `--host`     | yes      | —           | Hostname or IP of the remote SSH server.                                                          |
+| `--user`     | no       | OS username | SSH username. Falls back to the local OS user (`whoami`) when omitted.                            |
+| `--port`     | no       | `22`        | SSH port.                                                                                         |
+| `--password` | no\*     | —           | SSH password.                                                                                     |
+| `--key`      | no\*     | —           | Path to a private SSH key. Supports `~`, `$VAR`, `${VAR}`, and relative paths.                    |
+| `--key-env`  | no\*     | —           | Name of an env var holding the private key PEM (e.g. injected by envpkt, Vault, Doppler).         |
+| `--agent`    | no\*     | —           | Set to `true` to use `SSH_AUTH_SOCK` (system ssh-agent, 1Password, Bitwarden Desktop, KeePassXC). |
 
-\*If both `--password` and `--key` are omitted, the server starts anyway and delegates authentication to the SSH agent (or fails on first `exec` if none is available).
+\*Auth precedence is `--password` → `--key` → `--key-env` → `--agent`. If none are set the server starts but ssh2 will fail to authenticate on first `exec`.
+
+### Pulling keys from a password manager (Bitwarden / 1Password / KeePassXC)
+
+Each of these can expose your SSH keys via `SSH_AUTH_SOCK`. Unlock the vault, confirm the agent is enabled, then run with `--agent=true` — the server never sees the private key.
+
+```bash
+# verify the agent is reachable
+ssh-add -l
+
+# launch the MCP server through it
+ssh-client-mcp-server --host=1.2.3.4 --user=root --agent=true
+```
+
+For Bitwarden Desktop ≥ 2024.12: enable **Settings → SSH agent**, then on macOS confirm `launchctl getenv SSH_AUTH_SOCK` points at Bitwarden's socket.
+
+### Pulling keys from envpkt (or any tool that injects env vars)
+
+Store the PEM as a sealed value in `envpkt.toml`, then launch via `envpkt exec`:
+
+```bash
+envpkt exec -- ssh-client-mcp-server --host=1.2.3.4 --user=root --key-env=MY_SSH_KEY
+```
+
+Same pattern works for HashiCorp Vault, Doppler, Infisical, AWS Secrets Manager, or any wrapper that lands the key in `process.env`.
 
 ## Client Setup
 
