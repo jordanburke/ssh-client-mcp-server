@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.jordanburke/ssh-client-mcp-server",
-  "description": "MCP server that exposes SSH command execution to LLMs. Built on SomaMCP with functional config parsing (functype), path expansion (~, $VAR), and OS-user fallback.",
+  "description": "MCP server for executing shell commands on remote hosts via SSH.",
   "repository": {
     "url": "https://github.com/jordanburke/ssh-client-mcp-server",
     "source": "github"
   },
-  "version": "1.3.2",
+  "version": "1.3.3",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "ssh-client-mcp-server",
-      "version": "1.3.2",
+      "version": "1.3.3",
       "transport": {
         "type": "stdio"
       },
