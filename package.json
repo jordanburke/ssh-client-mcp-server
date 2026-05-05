@@ -73,7 +73,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^24.12.2",
+    "@types/node": "^25.6.0",
     "@types/ssh2": "^1.15.5",
     "ts-builds": "^2.7.2",
     "tsdown": "^0.21.10"
