@@ -1,0 +1,62 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jordanburke/ssh-client-mcp-server",
+  "description": "MCP server that exposes SSH command execution to LLMs. Built on SomaMCP with functional config parsing (functype), path expansion (~, $VAR), and OS-user fallback.",
+  "repository": {
+    "url": "https://github.com/jordanburke/ssh-client-mcp-server",
+    "source": "github"
+  },
+  "version": "1.3.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "ssh-client-mcp-server",
+      "version": "1.3.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--host",
+          "description": "SSH server hostname or IP address",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--user",
+          "description": "SSH username (defaults to current OS user if omitted)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--port",
+          "description": "SSH port (default: 22)",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--password",
+          "description": "SSH password (use either --password or --key)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "type": "named",
+          "name": "--key",
+          "description": "Path to private SSH key file (use either --password or --key); supports ~ and $VAR expansion",
+          "isRequired": false,
+          "format": "filepath",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
