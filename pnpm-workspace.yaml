@@ -1,0 +1,33 @@
+# Hoist CLI tool binaries from peer dependencies (migrated from .npmrc under pnpm 11)
+publicHoistPattern:
+  - "*eslint*"
+  - "*prettier*"
+  - "*vitest*"
+  - "typescript"
+  - "*rimraf*"
+  - "*cross-env*"
+
+# First-party packages we publish/control — trusted, so skip the 24h release-age
+# wait (pnpm 11 minimumReleaseAge default is 1440 minutes).
+minimumReleaseAgeExclude:
+  - ts-builds
+  - eslint-config-functype
+  - eslint-plugin-functype
+  - functype
+  - functype-log
+  - functype-os
+  - somamcp
+
+# pnpm 11 strictDepBuilds: approve/decline dependency build scripts explicitly.
+allowBuilds:
+  # esbuild's build script is not needed — its binary ships via @esbuild/<platform>
+  # optional dependencies.
+  esbuild: false
+  # cpu-features is an optional native addon ssh2 uses for crypto perf; ssh2 falls
+  # back to a pure-JS implementation when it's absent, so the build is not required.
+  cpu-features: false
+  # ssh2's install script only attempts to build the optional cpu-features addon.
+  ssh2: false
+  # tldjs's postinstall refreshes the public-suffix list; it ships with bundled data
+  # and works without running it.
+  tldjs: false
