@@ -31,8 +31,8 @@ importers:
         specifier: ^1.15.5
         version: 1.15.5
       ts-builds:
-        specifier: ^2.8.2
-        version: 2.8.2(@typescript-eslint/eslint-plugin@8.60.1(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(eslint@10.4.1)(typescript@6.0.3))(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(tsdown@0.22.2(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.13.1)(tsx@4.22.4))
+        specifier: ^3.0.1
+        version: 3.0.1(@typescript-eslint/eslint-plugin@8.60.1(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(eslint@10.4.1)(typescript@6.0.3))(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(tsdown@0.22.2(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.13.1)(tsx@4.22.4))
       tsdown:
         specifier: ^0.22.2
         version: 0.22.2(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13))
@@ -2227,8 +2227,9 @@ packages:
     peerDependencies:
       typescript: '>=4.8.4'
 
-  ts-builds@2.8.2:
-    resolution: {integrity: sha512-gAnX6NN18S0zbd9a98oVN+7fOs0hwjVDy9QJokkWkwa30DJm7eovJF3gHABYyaOIIUa/34agMlHPgSm/D9/Dkg==}
+  ts-builds@3.0.1:
+    resolution: {integrity: sha512-dVPc85D+FaghDKYAJFDmM6fPabxhmLymoSBOG4cQvljEJSZM6z2lE1DaWFYSgXIQN1xSvkTDNzVfTFnWEuPClg==}
+    engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
       tsdown: ^0.x
@@ -4572,7 +4573,7 @@ snapshots:
     dependencies:
       typescript: 6.0.3
 
-  ts-builds@2.8.2(@typescript-eslint/eslint-plugin@8.60.1(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(eslint@10.4.1)(typescript@6.0.3))(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(tsdown@0.22.2(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.13.1)(tsx@4.22.4)):
+  ts-builds@3.0.1(@typescript-eslint/eslint-plugin@8.60.1(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(eslint@10.4.1)(typescript@6.0.3))(@typescript-eslint/parser@8.60.1(eslint@10.4.1)(typescript@6.0.3))(tsdown@0.22.2(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.13.1)(tsx@4.22.4)):
     dependencies:
       '@eslint/js': 10.0.1(eslint@10.4.1)
       '@types/node': 24.10.15

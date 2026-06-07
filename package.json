@@ -77,7 +77,7 @@
   "devDependencies": {
     "@types/node": "^24.13.1",
     "@types/ssh2": "^1.15.5",
-    "ts-builds": "^2.8.2",
+    "ts-builds": "^3.0.1",
     "tsdown": "^0.22.2",
     "tsx": "^4.22.4"
   },
