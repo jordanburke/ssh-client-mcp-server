@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module"
+
 import { type Either, Option } from "functype"
 import { createServer, UserError } from "somamcp"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
@@ -7,6 +9,12 @@ import { z } from "zod"
 
 import { effectiveUser, parseArgv, resolveAuth, validateConfig } from "./config.js"
 import { type CommandResult, tmuxKeys, tmuxList, tmuxRead, type TmuxRunner, tmuxSend } from "./tmux.js"
+
+// Single source of truth for the server version: read the package's own
+// package.json at runtime so it can never drift from the published version.
+const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
+  version: `${number}.${number}.${number}`
+}
 
 // Example: node dist/index.js --host=1.2.3.4 --port=22 --user=root --password=pass --key=~/.ssh/id_rsa
 
@@ -110,7 +118,7 @@ async function main() {
 
   const server = createServer({
     name: "ssh-client-mcp-server",
-    version: "1.2.0",
+    version: pkgVersion,
     instructions: "Execute shell commands on a remote host over SSH.",
   })
 
