@@ -29,6 +29,7 @@ Design rule: `src/tmux.ts` never imports `ssh2` or `somamcp`. It returns `Either
 ## Task 1: Module scaffold — types and `validateSession`
 
 **Files:**
+
 - Create: `src/tmux.ts`
 - Test: `test/tmux.spec.ts`
 
@@ -99,6 +100,7 @@ git commit -m "feat(tmux): add module scaffold and session-name validation"
 ## Task 2: Pure helpers — `shellQuote`, `clampLines`, `trimTrailingBlankLines`, `validateKey`
 
 **Files:**
+
 - Modify: `src/tmux.ts`
 - Test: `test/tmux.spec.ts`
 
@@ -174,9 +176,27 @@ export const clampLines = (n: number): number => Math.max(1, Math.min(2000, Math
 export const trimTrailingBlankLines = (s: string): string => s.replace(/\s+$/, "")
 
 const ALLOWED_KEYS: ReadonlySet<string> = new Set([
-  "Enter", "Escape", "Tab", "Space", "BSpace",
-  "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown",
-  "C-c", "C-d", "C-z", "C-l", "C-u", "C-a", "C-e", "C-r",
+  "Enter",
+  "Escape",
+  "Tab",
+  "Space",
+  "BSpace",
+  "Up",
+  "Down",
+  "Left",
+  "Right",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+  "C-c",
+  "C-d",
+  "C-z",
+  "C-l",
+  "C-u",
+  "C-a",
+  "C-e",
+  "C-r",
 ])
 
 export const validateKey = (key: string): Either<string, string> =>
@@ -202,6 +222,7 @@ git commit -m "feat(tmux): add shell-quoting, line clamping, trim, and key valid
 ## Task 3: Command builders + injection-safety suite
 
 **Files:**
+
 - Modify: `src/tmux.ts`
 - Test: `test/tmux.spec.ts`
 
@@ -340,6 +361,7 @@ git commit -m "feat(tmux): add command builders with injection-safety tests"
 ## Task 4: Result interpreters
 
 **Files:**
+
 - Modify: `src/tmux.ts`
 - Test: `test/tmux.spec.ts`
 
@@ -435,8 +457,7 @@ const SESSION_MISSING_RE = /can't find session|session not found/i
 export const isTmuxMissing = (r: CommandResult): boolean =>
   r.code === 127 || /tmux: (command )?not found/i.test(r.stderr)
 
-const failure = (label: string, r: CommandResult): string =>
-  `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
+const failure = (label: string, r: CommandResult): string => `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
 
 export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<string>> => {
   if (isTmuxMissing(r)) return Left<string, ReadonlyArray<string>>(TMUX_MISSING_MSG)
@@ -500,6 +521,7 @@ git commit -m "feat(tmux): add result interpreters for list/send/read/keys"
 ## Task 5: Async operations over a `TmuxRunner`
 
 **Files:**
+
 - Modify: `src/tmux.ts`
 - Test: `test/tmux.spec.ts`
 
@@ -621,6 +643,7 @@ git commit -m "feat(tmux): add async operations over a TmuxRunner"
 ## Task 6: SSH runner + tool wiring in `index.ts`
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Add the stderr-tolerant runner**
@@ -670,14 +693,7 @@ import { type Either, Option } from "functype"
 and after the `./config.js` import line, add:
 
 ```ts
-import {
-  type CommandResult,
-  type TmuxRunner,
-  tmuxKeys,
-  tmuxList,
-  tmuxRead,
-  tmuxSend,
-} from "./tmux.js"
+import { type CommandResult, type TmuxRunner, tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "./tmux.js"
 ```
 
 - [ ] **Step 3: Wire the runner, default session, and tools**
@@ -685,64 +701,64 @@ import {
 Inside `main()`, immediately after the `server.addTool({ name: "exec", … })` block (after line 93), add:
 
 ```ts
-  const defaultSession = Option(argv["tmux-session"]).orElse("agent")
-  const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
-  const unwrap = <T>(result: Either<string, T>): T =>
-    result.fold(
-      (msg) => {
-        throw new UserError(msg)
-      },
-      (value) => value,
-    )
-
-  server.addTool({
-    name: "tmux_list",
-    description: "List live tmux sessions on the remote host.",
-    parameters: z.object({}),
-    execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner))),
-  })
-
-  server.addTool({
-    name: "tmux_send",
-    description:
-      "Type text into a persistent tmux session on the remote host (creates the session if it does not exist). Use to dispatch work to a long-running interactive process such as a coding agent.",
-    parameters: z.object({
-      session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
-      input: z.string().describe("Text to type into the session"),
-      submit: z.boolean().optional().describe("Press Enter after the text (default true)"),
-    }),
-    execute: async ({ session, input, submit }) => {
-      const target = session ?? defaultSession
-      unwrap(await tmuxSend(tmuxRunner, { session: target, input, submit: submit ?? true }))
-      return `Sent to tmux session "${target}".`
+const defaultSession = Option(argv["tmux-session"]).orElse("agent")
+const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
+const unwrap = <T>(result: Either<string, T>): T =>
+  result.fold(
+    (msg) => {
+      throw new UserError(msg)
     },
-  })
+    (value) => value,
+  )
 
-  server.addTool({
-    name: "tmux_read",
-    description: "Capture the recent output (pane transcript) of a tmux session on the remote host.",
-    parameters: z.object({
-      session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
-      lines: z.number().optional().describe("Lines of scrollback to capture (default 200, max 2000)"),
-    }),
-    execute: async ({ session, lines }) =>
-      unwrap(await tmuxRead(tmuxRunner, { session: session ?? defaultSession, lines: lines ?? 200 })),
-  })
+server.addTool({
+  name: "tmux_list",
+  description: "List live tmux sessions on the remote host.",
+  parameters: z.object({}),
+  execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner))),
+})
 
-  server.addTool({
-    name: "tmux_keys",
-    description:
-      "Send control/special keys to a tmux session (e.g. C-c to interrupt, Escape, Up). Use tmux_send for ordinary text.",
-    parameters: z.object({
-      session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
-      keys: z.array(z.string()).min(1).describe("tmux key names, e.g. ['C-c'] or ['Escape']"),
-    }),
-    execute: async ({ session, keys }) => {
-      const target = session ?? defaultSession
-      unwrap(await tmuxKeys(tmuxRunner, { session: target, keys }))
-      return `Sent keys [${keys.join(", ")}] to tmux session "${target}".`
-    },
-  })
+server.addTool({
+  name: "tmux_send",
+  description:
+    "Type text into a persistent tmux session on the remote host (creates the session if it does not exist). Use to dispatch work to a long-running interactive process such as a coding agent.",
+  parameters: z.object({
+    session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
+    input: z.string().describe("Text to type into the session"),
+    submit: z.boolean().optional().describe("Press Enter after the text (default true)"),
+  }),
+  execute: async ({ session, input, submit }) => {
+    const target = session ?? defaultSession
+    unwrap(await tmuxSend(tmuxRunner, { session: target, input, submit: submit ?? true }))
+    return `Sent to tmux session "${target}".`
+  },
+})
+
+server.addTool({
+  name: "tmux_read",
+  description: "Capture the recent output (pane transcript) of a tmux session on the remote host.",
+  parameters: z.object({
+    session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
+    lines: z.number().optional().describe("Lines of scrollback to capture (default 200, max 2000)"),
+  }),
+  execute: async ({ session, lines }) =>
+    unwrap(await tmuxRead(tmuxRunner, { session: session ?? defaultSession, lines: lines ?? 200 })),
+})
+
+server.addTool({
+  name: "tmux_keys",
+  description:
+    "Send control/special keys to a tmux session (e.g. C-c to interrupt, Escape, Up). Use tmux_send for ordinary text.",
+  parameters: z.object({
+    session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
+    keys: z.array(z.string()).min(1).describe("tmux key names, e.g. ['C-c'] or ['Escape']"),
+  }),
+  execute: async ({ session, keys }) => {
+    const target = session ?? defaultSession
+    unwrap(await tmuxKeys(tmuxRunner, { session: target, keys }))
+    return `Sent keys [${keys.join(", ")}] to tmux session "${target}".`
+  },
+})
 ```
 
 - [ ] **Step 4: Verify typecheck, lint, and existing tests pass**
@@ -762,6 +778,7 @@ git commit -m "feat(tmux): add execSshResult runner and register tmux_list/send/
 ## Task 7: Gated local-tmux integration test
 
 **Files:**
+
 - Create: `test/tmux.integration.spec.ts`
 
 This is the only test that exercises real tmux. It uses a local `child_process` runner (no SSH) and is skipped when tmux is not installed, so CI without tmux stays green. It also verifies the real `send-keys -l --` round-trip from Task 3's note.
@@ -852,6 +869,7 @@ git commit -m "test(tmux): add gated local-tmux round-trip integration test"
 ## Task 8: Documentation
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `CLAUDE.md`
 
@@ -934,6 +952,7 @@ gh pr create --base main --title "Add tmux persistent-session tools" --body "Imp
 ## Self-Review
 
 **Spec coverage:**
+
 - tmux-as-state-holder over one-shot SSH → Task 6 (`execSshResult` + `tmuxRunner`). ✓
 - One server per host / topology → no code; honored by not adding multi-host routing. ✓
 - Line-oriented operational recommendation → documented in Task 8 README. ✓

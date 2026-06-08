@@ -42,7 +42,7 @@ This is **Layer 1** of two:
 - **Layer 1 (this spec):** the dumb, reliable session primitive — attach/create,
   send input, read pane, on a single host.
 - **Layer 2 (future, separate spec):** a higher-order orchestrator MCP that knows
-  about N hosts, dispatches work, detects when an agent is *done and ready*, and
+  about N hosts, dispatches work, detects when an agent is _done and ready_, and
   keeps the fleet busy. All readiness/completion-detection intelligence lives
   here, not in Layer 1.
 
@@ -111,12 +111,12 @@ only tmux tools use `execSshResult`.
 
 ## Tool surface (additive)
 
-| Tool | Purpose | Underlying tmux command |
-|------|---------|-------------------------|
-| `tmux_list` | List live sessions on the host | `tmux list-sessions` |
+| Tool        | Purpose                                                     | Underlying tmux command                                                                                         |
+| ----------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `tmux_list` | List live sessions on the host                              | `tmux list-sessions`                                                                                            |
 | `tmux_send` | Ensure session exists, send literal text (+ optional Enter) | `tmux new-session -A -d -s <s>` then `tmux send-keys -t <s> -l <text>` (+ `send-keys -t <s> Enter` if `submit`) |
-| `tmux_read` | Capture the pane transcript | `tmux capture-pane -t <s> -p -J -S -<lines>` |
-| `tmux_keys` | Send control/special keys (escape hatch) | `tmux send-keys -t <s> <key…>` |
+| `tmux_read` | Capture the pane transcript                                 | `tmux capture-pane -t <s> -p -J -S -<lines>`                                                                    |
+| `tmux_keys` | Send control/special keys (escape hatch)                    | `tmux send-keys -t <s> <key…>`                                                                                  |
 
 `tmux_kill` (session teardown) is intentionally **omitted** (YAGNI); trivial to
 add later if fleet hygiene requires it.
@@ -140,14 +140,14 @@ specified when running several agents on one box.
 
 ## Error handling
 
-| Condition | Detection | Behavior |
-|-----------|-----------|----------|
-| tmux not installed | nonzero from a `command -v tmux` guard / command-not-found | Actionable `UserError`: *"tmux not found on `<host>` — install it or use `exec`."* |
-| No tmux server yet | `list-sessions` exits 1 with `no server running` | `tmux_list` returns **empty list**, not an error |
-| Session missing (read/keys) | `can't find session` | Clear error naming the session, suggesting `tmux_list` |
-| Auto-create race / already exists | — | Avoided by `new-session -A -d -s` (`-A` = attach-or-create, idempotent, `-d` = detached) |
-| Empty/blank pane | — | `tmux_read` trims trailing blank lines; returns `""` |
-| Connection / auth failure | ssh2 error | Same `UserError` path as today (shared connect logic) |
+| Condition                         | Detection                                                  | Behavior                                                                                 |
+| --------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| tmux not installed                | nonzero from a `command -v tmux` guard / command-not-found | Actionable `UserError`: _"tmux not found on `<host>` — install it or use `exec`."_       |
+| No tmux server yet                | `list-sessions` exits 1 with `no server running`           | `tmux_list` returns **empty list**, not an error                                         |
+| Session missing (read/keys)       | `can't find session`                                       | Clear error naming the session, suggesting `tmux_list`                                   |
+| Auto-create race / already exists | —                                                          | Avoided by `new-session -A -d -s` (`-A` = attach-or-create, idempotent, `-d` = detached) |
+| Empty/blank pane                  | —                                                          | `tmux_read` trims trailing blank lines; returns `""`                                     |
+| Connection / auth failure         | ssh2 error                                                 | Same `UserError` path as today (shared connect logic)                                    |
 
 ### Security — input & session-name handling
 
@@ -155,8 +155,8 @@ The tmux command is assembled into a string parsed by the **remote login shell**
 before tmux sees it. Therefore:
 
 - **`input` is shell-quoted** before interpolation (wrap in single quotes; escape
-  embedded `'` as `'\''`). The `-l` flag keeps input literal *to tmux*; the
-  quoting keeps it literal *to the shell*. **Both are required.** e.g.
+  embedded `'` as `'\''`). The `-l` flag keeps input literal _to tmux_; the
+  quoting keeps it literal _to the shell_. **Both are required.** e.g.
   `tmux_send(input: "; rm -rf ~")` must reach the pane as literal characters and
   never execute in the outer shell.
 - **`session` names are validated** against `^[A-Za-z0-9_-]+$` and **rejected**
