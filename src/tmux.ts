@@ -69,3 +69,58 @@ export const buildKeys = (session: string, keys: ReadonlyArray<string>): Either<
       ? Right<string, string>(`tmux send-keys -t ${s} ${keys.join(" ")}`)
       : Left<string, string>(`Unsupported key "${bad}"`)
   })
+
+const TMUX_MISSING_MSG =
+  "tmux not found on the remote host — install tmux (e.g. apt/brew install tmux) or use the exec tool instead"
+
+const SESSION_MISSING_RE = /can't find session|session not found/i
+
+export const isTmuxMissing = (r: CommandResult): boolean =>
+  r.code === 127 || /tmux: (command )?not found/i.test(r.stderr)
+
+const failure = (label: string, r: CommandResult): string =>
+  `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
+
+export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<string>> => {
+  if (isTmuxMissing(r)) return Left<string, ReadonlyArray<string>>(TMUX_MISSING_MSG)
+  if (r.code === 0) {
+    return Right<string, ReadonlyArray<string>>(
+      r.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0),
+    )
+  }
+  if (/no server running/i.test(r.stderr)) return Right<string, ReadonlyArray<string>>([])
+  return Left<string, ReadonlyArray<string>>(failure("tmux list-sessions", r))
+}
+
+export const interpretAck =
+  (label: string) =>
+  (r: CommandResult): Either<string, void> => {
+    if (isTmuxMissing(r)) return Left<string, void>(TMUX_MISSING_MSG)
+    if (r.code === 0) return Right<string, void>(undefined)
+    return Left<string, void>(failure(label, r))
+  }
+
+export const interpretRead =
+  (session: string) =>
+  (r: CommandResult): Either<string, string> => {
+    if (isTmuxMissing(r)) return Left<string, string>(TMUX_MISSING_MSG)
+    if (r.code === 0) return Right<string, string>(trimTrailingBlankLines(r.stdout))
+    if (SESSION_MISSING_RE.test(r.stderr)) {
+      return Left<string, string>(`No tmux session "${session}" — list with tmux_list, or tmux_send creates one`)
+    }
+    return Left<string, string>(failure("tmux capture-pane", r))
+  }
+
+export const interpretKeys =
+  (session: string) =>
+  (r: CommandResult): Either<string, void> => {
+    if (isTmuxMissing(r)) return Left<string, void>(TMUX_MISSING_MSG)
+    if (r.code === 0) return Right<string, void>(undefined)
+    if (SESSION_MISSING_RE.test(r.stderr)) {
+      return Left<string, void>(`No tmux session "${session}" — list with tmux_list, or tmux_send creates one`)
+    }
+    return Left<string, void>(failure("tmux send-keys", r))
+  }

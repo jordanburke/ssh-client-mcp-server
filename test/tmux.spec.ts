@@ -6,6 +6,11 @@ import {
   buildRead,
   buildSend,
   clampLines,
+  interpretAck,
+  interpretKeys,
+  interpretList,
+  interpretRead,
+  isTmuxMissing,
   shellQuote,
   trimTrailingBlankLines,
   validateKey,
@@ -153,5 +158,73 @@ describe("buildKeys", () => {
 
   it("propagates session validation failure", () => {
     expect(buildKeys("a b", ["Enter"]).isLeft()).toBe(true)
+  })
+})
+
+const res = (over: Partial<{ stdout: string; stderr: string; code: number }> = {}) => ({
+  stdout: "",
+  stderr: "",
+  code: 0,
+  ...over,
+})
+
+describe("isTmuxMissing", () => {
+  it("detects exit 127 and not-found stderr", () => {
+    expect(isTmuxMissing(res({ code: 127, stderr: "bash: tmux: command not found" }))).toBe(true)
+    expect(isTmuxMissing(res({ stderr: "tmux: not found", code: 1 }))).toBe(true)
+  })
+
+  it("is false for normal results", () => {
+    expect(isTmuxMissing(res({ stdout: "agent\n" }))).toBe(false)
+    expect(isTmuxMissing(res({ code: 1, stderr: "no server running on /tmp/tmux-1000/default" }))).toBe(false)
+  })
+})
+
+describe("interpretList", () => {
+  it("parses session names on success", () => {
+    const r = interpretList(res({ stdout: "agent\nbox-1\n" }))
+    if (r.isRight()) expect(r.value).toEqual(["agent", "box-1"])
+  })
+
+  it("returns an empty list when no server is running", () => {
+    const r = interpretList(res({ code: 1, stderr: "no server running on /tmp/tmux-1000/default" }))
+    expect(r.isRight()).toBe(true)
+    if (r.isRight()) expect(r.value).toEqual([])
+  })
+
+  it("surfaces a tmux-missing error", () => {
+    const r = interpretList(res({ code: 127, stderr: "tmux: command not found" }))
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain("tmux not found")
+  })
+})
+
+describe("interpretAck", () => {
+  it("returns Right on exit 0", () => {
+    expect(interpretAck("tmux_send")(res()).isRight()).toBe(true)
+  })
+
+  it("returns Left with the label on failure", () => {
+    const r = interpretAck("tmux_send")(res({ code: 1, stderr: "boom" }))
+    if (r.isLeft()) expect(r.value).toContain("tmux_send")
+  })
+})
+
+describe("interpretRead", () => {
+  it("trims the captured pane on success", () => {
+    const r = interpretRead("agent")(res({ stdout: "line1\nline2\n\n" }))
+    if (r.isRight()) expect(r.value).toBe("line1\nline2")
+  })
+
+  it("gives a clear error for a missing session", () => {
+    const r = interpretRead("ghost")(res({ code: 1, stderr: "can't find session: ghost" }))
+    if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
+  })
+})
+
+describe("interpretKeys", () => {
+  it("gives a clear error for a missing session", () => {
+    const r = interpretKeys("ghost")(res({ code: 1, stderr: "can't find session: ghost" }))
+    if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
   })
 })
