@@ -6,12 +6,12 @@
     "url": "https://github.com/jordanburke/ssh-client-mcp-server",
     "source": "github"
   },
-  "version": "1.4.0",
+  "version": "1.5.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "ssh-client-mcp-server",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "transport": {
         "type": "stdio"
       },
@@ -68,6 +68,14 @@
           "type": "named",
           "name": "--agent",
           "description": "Set to 'true' to authenticate via SSH_AUTH_SOCK (works with system ssh-agent, 1Password, Bitwarden Desktop, KeePassXC)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tmux-session",
+          "description": "Default tmux session name for the tmux_* tools (default: agent)",
           "isRequired": false,
           "format": "string",
           "isSecret": false

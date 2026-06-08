@@ -1,7 +1,7 @@
 {
   "name": "ssh-client-mcp-server",
   "license": "MIT",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "MCP server that exposes SSH command execution to LLMs. Config parsing (functype), path expansion (~, $VAR), and OS-user fallback.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
   "homepage": "https://github.com/jordanburke/ssh-client-mcp-server#readme",
