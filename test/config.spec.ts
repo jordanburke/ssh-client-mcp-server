@@ -73,6 +73,25 @@ describe("validateConfig", () => {
       expect(result.value).toContain("Invalid --port")
     }
   })
+
+  it("accepts a valid --tmux-session", () => {
+    const result = validateConfig({ host: "box", user: "root", "tmux-session": "agent-1" })
+    expect(result.isRight()).toBe(true)
+  })
+
+  it("rejects an invalid --tmux-session containing a space", () => {
+    const result = validateConfig({ host: "box", user: "root", "tmux-session": "bad name" })
+    expect(result.isLeft()).toBe(true)
+    if (result.isLeft()) {
+      expect(result.value).toContain("Invalid --tmux-session")
+      expect(result.value).toContain("bad name")
+    }
+  })
+
+  it("accepts config with no --tmux-session (optional arg)", () => {
+    const result = validateConfig({ host: "box", user: "root" })
+    expect(result.isRight()).toBe(true)
+  })
 })
 
 describe("effectiveUser", () => {

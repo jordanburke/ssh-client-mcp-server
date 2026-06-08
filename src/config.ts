@@ -2,6 +2,8 @@ import { type Either, Left, List, Option, Right } from "functype"
 import { Fs, Path, Platform } from "functype-os"
 import { type ConnectConfig } from "ssh2"
 
+import { validateSession } from "./tmux.js"
+
 export type ArgvConfig = Readonly<Record<string, string>>
 
 export const parseArgv = (args: ReadonlyArray<string>): ArgvConfig =>
@@ -22,6 +24,12 @@ export const validateConfig = (config: ArgvConfig): Either<string, void> => {
       (_) => Option.none<string>(),
     ),
     config.port && isNaN(Number(config.port)) ? Option("Invalid --port") : Option.none<string>(),
+    config["tmux-session"] !== undefined
+      ? validateSession(config["tmux-session"]).fold(
+          (msg) => Option(`Invalid --tmux-session: ${msg}`),
+          (_) => Option.none<string>(),
+        )
+      : Option.none<string>(),
   ).flatMap((o) => o.toList())
 
   return errors.isEmpty
