@@ -124,3 +124,33 @@ export const interpretKeys =
     }
     return Left<string, void>(failure("tmux send-keys", r))
   }
+
+export const tmuxList = async (runner: TmuxRunner): Promise<Either<string, ReadonlyArray<string>>> =>
+  interpretList(await runner(buildList()))
+
+export const tmuxSend = async (
+  runner: TmuxRunner,
+  p: Readonly<{ session: string; input: string; submit: boolean }>,
+): Promise<Either<string, void>> => {
+  const cmd = buildSend(p.session, p.input, p.submit)
+  if (cmd.isLeft()) return Left<string, void>(cmd.value)
+  return interpretAck("tmux_send")(await runner(cmd.value))
+}
+
+export const tmuxRead = async (
+  runner: TmuxRunner,
+  p: Readonly<{ session: string; lines: number }>,
+): Promise<Either<string, string>> => {
+  const cmd = buildRead(p.session, p.lines)
+  if (cmd.isLeft()) return Left<string, string>(cmd.value)
+  return interpretRead(p.session)(await runner(cmd.value))
+}
+
+export const tmuxKeys = async (
+  runner: TmuxRunner,
+  p: Readonly<{ session: string; keys: ReadonlyArray<string> }>,
+): Promise<Either<string, void>> => {
+  const cmd = buildKeys(p.session, p.keys)
+  if (cmd.isLeft()) return Left<string, void>(cmd.value)
+  return interpretKeys(p.session)(await runner(cmd.value))
+}

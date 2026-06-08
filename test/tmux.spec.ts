@@ -12,10 +12,15 @@ import {
   interpretRead,
   isTmuxMissing,
   shellQuote,
+  tmuxKeys,
+  tmuxList,
+  tmuxRead,
+  tmuxSend,
   trimTrailingBlankLines,
   validateKey,
   validateSession,
 } from "../src/tmux.js"
+import type { TmuxRunner } from "../src/tmux.js"
 
 describe("validateSession", () => {
   it("accepts safe names", () => {
@@ -226,5 +231,58 @@ describe("interpretKeys", () => {
   it("gives a clear error for a missing session", () => {
     const r = interpretKeys("ghost")(res({ code: 1, stderr: "can't find session: ghost" }))
     if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
+  })
+})
+
+// A stub runner that records the command it was given and returns a canned result.
+const stubRunner = (result: { stdout?: string; stderr?: string; code?: number }) => {
+  const calls: string[] = []
+  const runner: TmuxRunner = async (command) => {
+    calls.push(command)
+    return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", code: result.code ?? 0 }
+  }
+  return { runner, calls }
+}
+
+describe("tmuxList (operation)", () => {
+  it("runs list-sessions and parses names", async () => {
+    const { runner, calls } = stubRunner({ stdout: "agent\n" })
+    const r = await tmuxList(runner)
+    expect(calls).toEqual(["tmux list-sessions -F '#{session_name}'"])
+    if (r.isRight()) expect(r.value).toEqual(["agent"])
+  })
+})
+
+describe("tmuxSend (operation)", () => {
+  it("builds the create+send command and acks", async () => {
+    const { runner, calls } = stubRunner({ code: 0 })
+    const r = await tmuxSend(runner, { session: "agent", input: "echo hi", submit: true })
+    expect(r.isRight()).toBe(true)
+    expect(calls[0]).toContain("tmux new-session -A -d -s agent")
+    expect(calls[0]).toContain("send-keys -t agent -l -- 'echo hi'")
+  })
+
+  it("short-circuits on an invalid session without calling the runner", async () => {
+    const { runner, calls } = stubRunner({ code: 0 })
+    const r = await tmuxSend(runner, { session: "a; b", input: "x", submit: true })
+    expect(r.isLeft()).toBe(true)
+    expect(calls).toEqual([])
+  })
+})
+
+describe("tmuxRead (operation)", () => {
+  it("returns the trimmed pane", async () => {
+    const { runner } = stubRunner({ stdout: "out\n\n" })
+    const r = await tmuxRead(runner, { session: "agent", lines: 100 })
+    if (r.isRight()) expect(r.value).toBe("out")
+  })
+})
+
+describe("tmuxKeys (operation)", () => {
+  it("sends validated keys", async () => {
+    const { runner, calls } = stubRunner({ code: 0 })
+    const r = await tmuxKeys(runner, { session: "agent", keys: ["C-c"] })
+    expect(r.isRight()).toBe(true)
+    expect(calls).toEqual(["tmux send-keys -t agent C-c"])
   })
 })
