@@ -9,15 +9,13 @@ const SESSION_RE = /^[A-Za-z0-9_-]+$/
 export const validateSession = (name: string): Either<string, string> =>
   SESSION_RE.test(name)
     ? Right<string, string>(name)
-    : Left<string, string>(
-        `Invalid session name "${name}": only letters, digits, hyphen, and underscore are allowed`,
-      )
+    : Left<string, string>(`Invalid session name "${name}": only letters, digits, hyphen, and underscore are allowed`)
 
 export const shellQuote = (s: string): string => `'${s.replaceAll("'", "'\\''")}'`
 
 export const clampLines = (n: number): number => Math.max(1, Math.min(2000, Math.floor(n)))
 
-export const trimTrailingBlankLines = (s: string): string => s.replace(/\s+$/, "")
+export const trimTrailingWhitespace = (s: string): string => s.replace(/\s+$/, "")
 
 const ALLOWED_KEYS: ReadonlySet<string> = new Set([
   "Enter",
@@ -52,6 +50,8 @@ export const buildList = (): string => "tmux list-sessions -F '#{session_name}'"
 
 export const buildSend = (session: string, input: string, submit: boolean): Either<string, string> =>
   validateSession(session).map((s) => {
+    // s is interpolated unquoted into -s/-t because SESSION_RE guarantees no shell metacharacters;
+    // if that regex is ever relaxed, quoting would be required here.
     const create = `tmux new-session -A -d -s ${s}`
     const send = `tmux send-keys -t ${s} -l -- ${shellQuote(input)}`
     const enter = submit ? ` && tmux send-keys -t ${s} Enter` : ""
@@ -65,9 +65,7 @@ export const buildKeys = (session: string, keys: ReadonlyArray<string>): Either<
   validateSession(session).flatMap((s) => {
     if (keys.length === 0) return Left<string, string>("No keys provided")
     const bad = keys.find((k) => validateKey(k).isLeft())
-    return bad === undefined
-      ? Right<string, string>(`tmux send-keys -t ${s} ${keys.join(" ")}`)
-      : Left<string, string>(`Unsupported key "${bad}"`)
+    return bad === undefined ? Right<string, string>(`tmux send-keys -t ${s} ${keys.join(" ")}`) : validateKey(bad)
   })
 
 const TMUX_MISSING_MSG =
@@ -76,10 +74,9 @@ const TMUX_MISSING_MSG =
 const SESSION_MISSING_RE = /can't find session|session not found/i
 
 export const isTmuxMissing = (r: CommandResult): boolean =>
-  r.code === 127 || /tmux: (command )?not found/i.test(r.stderr)
+  r.code === 127 || /tmux: ([Cc]ommand )?not found/i.test(r.stderr)
 
-const failure = (label: string, r: CommandResult): string =>
-  `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
+const failure = (label: string, r: CommandResult): string => `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
 
 export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<string>> => {
   if (isTmuxMissing(r)) return Left<string, ReadonlyArray<string>>(TMUX_MISSING_MSG)
@@ -107,7 +104,7 @@ export const interpretRead =
   (session: string) =>
   (r: CommandResult): Either<string, string> => {
     if (isTmuxMissing(r)) return Left<string, string>(TMUX_MISSING_MSG)
-    if (r.code === 0) return Right<string, string>(trimTrailingBlankLines(r.stdout))
+    if (r.code === 0) return Right<string, string>(trimTrailingWhitespace(r.stdout))
     if (SESSION_MISSING_RE.test(r.stderr)) {
       return Left<string, string>(`No tmux session "${session}" — list with tmux_list, or tmux_send creates one`)
     }

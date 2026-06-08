@@ -16,7 +16,7 @@ import {
   tmuxList,
   tmuxRead,
   tmuxSend,
-  trimTrailingBlankLines,
+  trimTrailingWhitespace,
   validateKey,
   validateSession,
 } from "../src/tmux.js"
@@ -65,13 +65,13 @@ describe("clampLines", () => {
   })
 })
 
-describe("trimTrailingBlankLines", () => {
+describe("trimTrailingWhitespace", () => {
   it("strips trailing whitespace and blank lines", () => {
-    expect(trimTrailingBlankLines("a\nb\n\n  \n")).toBe("a\nb")
+    expect(trimTrailingWhitespace("a\nb\n\n  \n")).toBe("a\nb")
   })
 
   it("returns empty string for all-blank input", () => {
-    expect(trimTrailingBlankLines("\n  \n\t\n")).toBe("")
+    expect(trimTrailingWhitespace("\n  \n\t\n")).toBe("")
   })
 })
 
@@ -108,6 +108,7 @@ describe("buildSend", () => {
 
   it("omits Enter when submit is false", () => {
     const r = buildSend("agent", "partial", false)
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) {
       expect(r.value).toBe("tmux new-session -A -d -s agent && tmux send-keys -t agent -l -- 'partial'")
     }
@@ -134,11 +135,13 @@ describe("buildSend", () => {
 describe("buildRead", () => {
   it("captures the pane as plain text with clamped scrollback", () => {
     const r = buildRead("agent", 200)
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) expect(r.value).toBe("tmux capture-pane -t agent -p -J -S -200")
   })
 
   it("clamps the line count", () => {
     const r = buildRead("agent", 99999)
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) expect(r.value).toBe("tmux capture-pane -t agent -p -J -S -2000")
   })
 
@@ -150,6 +153,7 @@ describe("buildRead", () => {
 describe("buildKeys", () => {
   it("sends allowlisted keys to the session", () => {
     const r = buildKeys("agent", ["C-c"])
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) expect(r.value).toBe("tmux send-keys -t agent C-c")
   })
 
@@ -157,8 +161,10 @@ describe("buildKeys", () => {
     expect(buildKeys("agent", []).isLeft()).toBe(true)
   })
 
-  it("rejects a non-allowlisted key", () => {
-    expect(buildKeys("agent", ["Enter", "rm -rf"]).isLeft()).toBe(true)
+  it("rejects a non-allowlisted key and propagates the full validateKey message", () => {
+    const r = buildKeys("agent", ["Enter", "rm -rf"])
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain("allowed keys are")
   })
 
   it("propagates session validation failure", () => {
@@ -177,6 +183,10 @@ describe("isTmuxMissing", () => {
   it("detects exit 127 and not-found stderr", () => {
     expect(isTmuxMissing(res({ code: 127, stderr: "bash: tmux: command not found" }))).toBe(true)
     expect(isTmuxMissing(res({ stderr: "tmux: not found", code: 1 }))).toBe(true)
+  })
+
+  it("detects csh/tcsh form 'tmux: Command not found.'", () => {
+    expect(isTmuxMissing(res({ code: 1, stderr: "tmux: Command not found." }))).toBe(true)
   })
 
   it("is false for normal results", () => {
@@ -211,6 +221,7 @@ describe("interpretAck", () => {
 
   it("returns Left with the label on failure", () => {
     const r = interpretAck("tmux_send")(res({ code: 1, stderr: "boom" }))
+    expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain("tmux_send")
   })
 })
@@ -218,11 +229,13 @@ describe("interpretAck", () => {
 describe("interpretRead", () => {
   it("trims the captured pane on success", () => {
     const r = interpretRead("agent")(res({ stdout: "line1\nline2\n\n" }))
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) expect(r.value).toBe("line1\nline2")
   })
 
   it("gives a clear error for a missing session", () => {
     const r = interpretRead("ghost")(res({ code: 1, stderr: "can't find session: ghost" }))
+    expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
   })
 })
@@ -230,6 +243,7 @@ describe("interpretRead", () => {
 describe("interpretKeys", () => {
   it("gives a clear error for a missing session", () => {
     const r = interpretKeys("ghost")(res({ code: 1, stderr: "can't find session: ghost" }))
+    expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
   })
 })
