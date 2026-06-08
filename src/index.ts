@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-import { Option } from "functype"
+import { type Either, Option } from "functype"
 import { createServer, UserError } from "somamcp"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 import { z } from "zod"
 
 import { effectiveUser, parseArgv, resolveAuth, validateConfig } from "./config.js"
+import { type CommandResult, tmuxKeys, tmuxList, tmuxRead, type TmuxRunner, tmuxSend } from "./tmux.js"
 
 // Example: node dist/index.js --host=1.2.3.4 --port=22 --user=root --password=pass --key=~/.ssh/id_rsa
 
@@ -37,6 +38,36 @@ const execSshCommand = (sshConfig: ConnectConfig, command: string): Promise<stri
         stream.stderr.on("data", (data: Buffer) => {
           stderrChunks.push(data)
         })
+      })
+    })
+    conn.on("error", (err) => {
+      reject(new UserError(`SSH connection error: ${err.message}`))
+    })
+    conn.connect(sshConfig)
+  })
+
+const execSshResult = (sshConfig: ConnectConfig, command: string): Promise<CommandResult> =>
+  new Promise((resolve, reject) => {
+    const conn = new SSHClient()
+    conn.on("ready", () => {
+      conn.exec(command, (err, stream) => {
+        if (err) {
+          reject(new UserError(`SSH exec error: ${err.message}`))
+          conn.end()
+          return
+        }
+        const stdoutChunks: Buffer[] = []
+        const stderrChunks: Buffer[] = []
+        stream.on("close", (code: number) => {
+          conn.end()
+          resolve({
+            stdout: Buffer.concat(stdoutChunks).toString(),
+            stderr: Buffer.concat(stderrChunks).toString(),
+            code: code ?? 0,
+          })
+        })
+        stream.on("data", (data: Buffer) => stdoutChunks.push(data))
+        stream.stderr.on("data", (data: Buffer) => stderrChunks.push(data))
       })
     })
     conn.on("error", (err) => {
@@ -90,6 +121,65 @@ async function main() {
       command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
     }),
     execute: async ({ command }) => execSshCommand(sshConfig, command),
+  })
+
+  const defaultSession = Option(argv["tmux-session"]).orElse("agent")
+  const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
+  const unwrap = <T>(result: Either<string, T>): T =>
+    result.fold(
+      (msg) => {
+        throw new UserError(msg)
+      },
+      (value) => value,
+    )
+
+  server.addTool({
+    name: "tmux_list",
+    description: "List live tmux sessions on the remote host.",
+    parameters: z.object({}),
+    execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner))),
+  })
+
+  server.addTool({
+    name: "tmux_send",
+    description:
+      "Type text into a persistent tmux session on the remote host (creates the session if it does not exist). Use to dispatch work to a long-running interactive process such as a coding agent.",
+    parameters: z.object({
+      session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
+      input: z.string().describe("Text to type into the session"),
+      submit: z.boolean().optional().describe("Press Enter after the text (default true)"),
+    }),
+    execute: async ({ session, input, submit }) => {
+      const target = session ?? defaultSession
+      unwrap(await tmuxSend(tmuxRunner, { session: target, input, submit: submit ?? true }))
+      return `Sent to tmux session "${target}".`
+    },
+  })
+
+  server.addTool({
+    name: "tmux_read",
+    description: "Capture the recent output (pane transcript) of a tmux session on the remote host.",
+    parameters: z.object({
+      session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
+      lines: z.number().optional().describe("Lines of scrollback to capture (default 200, max 2000)"),
+    }),
+    execute: async ({ session, lines }) =>
+      unwrap(await tmuxRead(tmuxRunner, { session: session ?? defaultSession, lines: lines ?? 200 })),
+  })
+
+  server.addTool({
+    name: "tmux_keys",
+    description:
+      "Send control/special keys to a tmux session (e.g. C-c to interrupt, Escape, Up). Use tmux_send for ordinary text.",
+    parameters: z.object({
+      session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
+      keys: z.array(z.string()).min(1).describe("tmux key names, e.g. ['C-c'] or ['Escape']"),
+    }),
+    execute: async ({ session, keys }) => {
+      const target = session ?? defaultSession
+      unwrap(await tmuxKeys(tmuxRunner, { session: target, keys }))
+      return `Sent keys [${keys.join(", ")}] to tmux session "${target}".`
+    },
   })
 
   await server.start({ transportType: "stdio" })
