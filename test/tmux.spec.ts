@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
 
-import { clampLines, shellQuote, trimTrailingBlankLines, validateKey, validateSession } from "../src/tmux.js"
+import {
+  buildKeys,
+  buildList,
+  buildRead,
+  buildSend,
+  clampLines,
+  shellQuote,
+  trimTrailingBlankLines,
+  validateKey,
+  validateSession,
+} from "../src/tmux.js"
 
 describe("validateSession", () => {
   it("accepts safe names", () => {
@@ -66,5 +76,82 @@ describe("validateKey", () => {
     for (const k of ["rm", "C-c; rm", "Enter Enter", ""]) {
       expect(validateKey(k).isLeft()).toBe(true)
     }
+  })
+})
+
+describe("buildList", () => {
+  it("requests one session name per line", () => {
+    expect(buildList()).toBe("tmux list-sessions -F '#{session_name}'")
+  })
+})
+
+describe("buildSend", () => {
+  it("creates (idempotent) then sends literal text with Enter", () => {
+    const r = buildSend("agent", "ls -la", true)
+    expect(r.isRight()).toBe(true)
+    if (r.isRight()) {
+      expect(r.value).toBe(
+        "tmux new-session -A -d -s agent && tmux send-keys -t agent -l -- 'ls -la' && tmux send-keys -t agent Enter",
+      )
+    }
+  })
+
+  it("omits Enter when submit is false", () => {
+    const r = buildSend("agent", "partial", false)
+    if (r.isRight()) {
+      expect(r.value).toBe("tmux new-session -A -d -s agent && tmux send-keys -t agent -l -- 'partial'")
+    }
+  })
+
+  it("propagates session validation failure", () => {
+    expect(buildSend("a; b", "x", true).isLeft()).toBe(true)
+  })
+
+  describe("injection safety", () => {
+    it("renders dangerous input inert via single-quoting", () => {
+      for (const payload of ["; rm -rf ~", "$(whoami)", "`id`", "a'b", "x && y", "$HOME"]) {
+        const r = buildSend("agent", payload, true)
+        expect(r.isRight()).toBe(true)
+        if (r.isRight()) {
+          // The payload appears only inside the single-quoted send-keys argument.
+          expect(r.value).toContain(`-l -- ${shellQuote(payload)}`)
+        }
+      }
+    })
+  })
+})
+
+describe("buildRead", () => {
+  it("captures the pane as plain text with clamped scrollback", () => {
+    const r = buildRead("agent", 200)
+    if (r.isRight()) expect(r.value).toBe("tmux capture-pane -t agent -p -J -S -200")
+  })
+
+  it("clamps the line count", () => {
+    const r = buildRead("agent", 99999)
+    if (r.isRight()) expect(r.value).toBe("tmux capture-pane -t agent -p -J -S -2000")
+  })
+
+  it("propagates session validation failure", () => {
+    expect(buildRead("../x", 10).isLeft()).toBe(true)
+  })
+})
+
+describe("buildKeys", () => {
+  it("sends allowlisted keys to the session", () => {
+    const r = buildKeys("agent", ["C-c"])
+    if (r.isRight()) expect(r.value).toBe("tmux send-keys -t agent C-c")
+  })
+
+  it("rejects an empty key list", () => {
+    expect(buildKeys("agent", []).isLeft()).toBe(true)
+  })
+
+  it("rejects a non-allowlisted key", () => {
+    expect(buildKeys("agent", ["Enter", "rm -rf"]).isLeft()).toBe(true)
+  })
+
+  it("propagates session validation failure", () => {
+    expect(buildKeys("a b", ["Enter"]).isLeft()).toBe(true)
   })
 })

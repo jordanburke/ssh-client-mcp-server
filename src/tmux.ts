@@ -47,3 +47,25 @@ export const validateKey = (key: string): Either<string, string> =>
   ALLOWED_KEYS.has(key)
     ? Right<string, string>(key)
     : Left<string, string>(`Unsupported key "${key}": allowed keys are ${[...ALLOWED_KEYS].join(", ")}`)
+
+export const buildList = (): string => "tmux list-sessions -F '#{session_name}'"
+
+export const buildSend = (session: string, input: string, submit: boolean): Either<string, string> =>
+  validateSession(session).map((s) => {
+    const create = `tmux new-session -A -d -s ${s}`
+    const send = `tmux send-keys -t ${s} -l -- ${shellQuote(input)}`
+    const enter = submit ? ` && tmux send-keys -t ${s} Enter` : ""
+    return `${create} && ${send}${enter}`
+  })
+
+export const buildRead = (session: string, lines: number): Either<string, string> =>
+  validateSession(session).map((s) => `tmux capture-pane -t ${s} -p -J -S -${clampLines(lines)}`)
+
+export const buildKeys = (session: string, keys: ReadonlyArray<string>): Either<string, string> =>
+  validateSession(session).flatMap((s) => {
+    if (keys.length === 0) return Left<string, string>("No keys provided")
+    const bad = keys.find((k) => validateKey(k).isLeft())
+    return bad === undefined
+      ? Right<string, string>(`tmux send-keys -t ${s} ${keys.join(" ")}`)
+      : Left<string, string>(`Unsupported key "${bad}"`)
+  })
