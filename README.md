@@ -46,6 +46,17 @@ No global install required — `npx` fetches and runs the latest published versi
 | `soma_capabilities` | Enumerate registered tools, resources, and prompts.                 |
 | `soma_connections`  | Gateway connection status (unused here).                            |
 
+### Persistent sessions (tmux)
+
+For driving long-running interactive processes (e.g. a remote coding agent) across calls, the server exposes tmux-backed tools. tmux must be installed on the remote host.
+
+- `tmux_list` — list live tmux sessions.
+- `tmux_send({ session?, input, submit? })` — type `input` into `session` (created if absent); presses Enter unless `submit: false`.
+- `tmux_read({ session?, lines? })` — return the recent pane transcript (`lines` default 200, max 2000).
+- `tmux_keys({ session?, keys })` — send control/special keys, e.g. `{ keys: ["C-c"] }`.
+
+`session` defaults to `--tmux-session` (default `agent`). Tip: run agents in a line-oriented mode (not a full-screen TUI) so `tmux_read` returns a clean transcript.
+
 ## Installation
 
 ### Run via `npx` (recommended)

@@ -24,7 +24,9 @@ This project uses [`ts-builds`](https://github.com/jordanburke/ts-builds) to del
 ### Core Components
 
 - **Single entry point**: `src/index.ts` wires up the server via `createServer()` and registers a single `exec` tool
-- **MCP Tool**: `exec` — runs a shell command on the remote host, returns stdout as a string. stderr becomes a `UserError`
+- **MCP Tools**:
+  - `exec` — runs a one-shot shell command on the remote host, returns stdout as a string. stderr becomes a `UserError`
+  - `tmux_list` / `tmux_send` / `tmux_read` / `tmux_keys` — persistent interactive sessions backed by remote tmux (see `src/tmux.ts`). tmux is the state-holder; each tool is one tmux subcommand over the same one-shot SSH transport. Pure command builders + interpreters live in `src/tmux.ts`; `execSshResult` in `src/index.ts` is the stderr-tolerant runner they use.
 - **SSH Client**: Uses `ssh2` library; password or key authentication
 - **Configuration**: CLI arg parsing for SSH connection parameters (host/port/user/password/key)
 - **Transport**: stdio (single `server.start({ transportType: "stdio" })` call)
@@ -59,6 +61,7 @@ Server accepts these CLI arguments:
 - `--port` (optional): SSH port (default: 22)
 - `--password` (optional): SSH password
 - `--key` (optional): Path to private SSH key
+- `--tmux-session` (optional): default tmux session name for the tmux\_\* tools (default: `agent`)
 
 Either `--password` or `--key` must be provided for authentication.
 
