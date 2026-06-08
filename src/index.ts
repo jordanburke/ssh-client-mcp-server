@@ -135,7 +135,7 @@ async function main() {
 
   server.addTool({
     name: "tmux_list",
-    description: "List live tmux sessions on the remote host.",
+    description: "List live tmux sessions on the remote host. Returns a JSON array of session names.",
     parameters: z.object({}),
     execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner))),
   })
@@ -146,7 +146,7 @@ async function main() {
       "Type text into a persistent tmux session on the remote host (creates the session if it does not exist). Use to dispatch work to a long-running interactive process such as a coding agent.",
     parameters: z.object({
       session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
-      input: z.string().describe("Text to type into the session"),
+      input: z.string().min(1).describe("Text to type into the session"),
       submit: z.boolean().optional().describe("Press Enter after the text (default true)"),
     }),
     execute: async ({ session, input, submit }) => {
@@ -161,7 +161,12 @@ async function main() {
     description: "Capture the recent output (pane transcript) of a tmux session on the remote host.",
     parameters: z.object({
       session: z.string().optional().describe("tmux session name (defaults to --tmux-session)"),
-      lines: z.number().optional().describe("Lines of scrollback to capture (default 200, max 2000)"),
+      lines: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Lines of scrollback to capture (default 200; capped at 2000)"),
     }),
     execute: async ({ session, lines }) =>
       unwrap(await tmuxRead(tmuxRunner, { session: session ?? defaultSession, lines: lines ?? 200 })),
