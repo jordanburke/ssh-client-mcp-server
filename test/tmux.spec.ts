@@ -96,12 +96,13 @@ describe("buildList", () => {
 })
 
 describe("buildSend", () => {
-  it("creates (idempotent) then sends literal text with Enter", () => {
+  it("ensures the session headlessly (no attach) then sends literal text with Enter", () => {
     const r = buildSend("agent", "ls -la", true)
     expect(r.isRight()).toBe(true)
     if (r.isRight()) {
       expect(r.value).toBe(
-        "tmux new-session -A -d -s agent && tmux send-keys -t agent -l -- 'ls -la' && tmux send-keys -t agent Enter",
+        "{ tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent; } && " +
+          "tmux send-keys -t agent -l -- 'ls -la' && tmux send-keys -t agent Enter",
       )
     }
   })
@@ -110,7 +111,19 @@ describe("buildSend", () => {
     const r = buildSend("agent", "partial", false)
     expect(r.isRight()).toBe(true)
     if (r.isRight()) {
-      expect(r.value).toBe("tmux new-session -A -d -s agent && tmux send-keys -t agent -l -- 'partial'")
+      expect(r.value).toBe(
+        "{ tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent; } && " +
+          "tmux send-keys -t agent -l -- 'partial'",
+      )
+    }
+  })
+
+  it("never uses `new-session -A` (attach needs a TTY, fails over SSH exec)", () => {
+    const r = buildSend("agent", "x", true)
+    expect(r.isRight()).toBe(true)
+    if (r.isRight()) {
+      expect(r.value).not.toContain("new-session -A")
+      expect(r.value).toContain("has-session -t agent")
     }
   })
 
@@ -272,7 +285,7 @@ describe("tmuxSend (operation)", () => {
     const { runner, calls } = stubRunner({ code: 0 })
     const r = await tmuxSend(runner, { session: "agent", input: "echo hi", submit: true })
     expect(r.isRight()).toBe(true)
-    expect(calls[0]).toContain("tmux new-session -A -d -s agent")
+    expect(calls[0]).toContain("tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent")
     expect(calls[0]).toContain("send-keys -t agent -l -- 'echo hi'")
   })
 

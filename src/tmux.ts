@@ -52,10 +52,15 @@ export const buildSend = (session: string, input: string, submit: boolean): Eith
   validateSession(session).map((s) => {
     // s is interpolated unquoted into -s/-t because SESSION_RE guarantees no shell metacharacters;
     // if that regex is ever relaxed, quoting would be required here.
-    const create = `tmux new-session -A -d -s ${s}`
+    //
+    // Ensure the session exists WITHOUT attaching: `new-session -A` would attach when the
+    // session already exists, which needs a TTY and fails over an SSH exec channel
+    // ("open terminal failed: not a terminal"). `has-session || new-session -d` only ever
+    // checks-or-creates detached, so it works headlessly on both the first and later sends.
+    const ensure = `{ tmux has-session -t ${s} 2>/dev/null || tmux new-session -d -s ${s}; }`
     const send = `tmux send-keys -t ${s} -l -- ${shellQuote(input)}`
     const enter = submit ? ` && tmux send-keys -t ${s} Enter` : ""
-    return `${create} && ${send}${enter}`
+    return `${ensure} && ${send}${enter}`
   })
 
 export const buildRead = (session: string, lines: number): Either<string, string> =>

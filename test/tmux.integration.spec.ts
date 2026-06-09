@@ -54,4 +54,18 @@ describe.skipIf(!hasTmux)("tmux integration (local)", () => {
     expect(r.isRight()).toBe(true)
     if (r.isRight()) expect(r.value).toContain(session)
   })
+
+  // Regression: a second send targets an ALREADY-EXISTING session. The old
+  // `new-session -A -d` form attached here (needs a TTY) and failed over a
+  // non-TTY runner with "open terminal failed: not a terminal".
+  it("sends again to an existing session without needing a TTY", async () => {
+    const again = await tmuxSend(localRunner, { session, input: "echo second-send-ok", submit: true })
+    expect(again.isRight()).toBe(true)
+
+    await wait(400)
+
+    const read = await tmuxRead(localRunner, { session, lines: 100 })
+    expect(read.isRight()).toBe(true)
+    if (read.isRight()) expect(read.value).toContain("second-send-ok")
+  })
 })
