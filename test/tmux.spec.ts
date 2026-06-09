@@ -251,6 +251,12 @@ describe("interpretRead", () => {
     expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
   })
+
+  it("maps capture-pane's \"can't find pane\" wording to the friendly hint", () => {
+    const r = interpretRead("ghost")(res({ code: 1, stderr: "can't find pane: ghost" }))
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
+  })
 })
 
 describe("interpretKeys", () => {

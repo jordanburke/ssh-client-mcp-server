@@ -76,7 +76,9 @@ export const buildKeys = (session: string, keys: ReadonlyArray<string>): Either<
 const TMUX_MISSING_MSG =
   "tmux not found on the remote host — install tmux (e.g. apt/brew install tmux) or use the exec tool instead"
 
-const SESSION_MISSING_RE = /can't find session|session not found/i
+// tmux phrases a missing target differently per subcommand: send-keys says
+// "can't find session", capture-pane says "can't find pane". Match both.
+const SESSION_MISSING_RE = /can't find session|can't find pane|session not found/i
 
 export const isTmuxMissing = (r: CommandResult): boolean =>
   r.code === 127 || /tmux: ([Cc]ommand )?not found/i.test(r.stderr)
