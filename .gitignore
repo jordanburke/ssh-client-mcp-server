@@ -42,3 +42,6 @@ node_modules/
 
 # Claude Code
 .claude/settings.local.json
+
+# Local MCP test harness (points at a specific SSH host; never commit)
+.mcp.json

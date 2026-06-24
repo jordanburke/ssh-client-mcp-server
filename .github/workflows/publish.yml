@@ -11,6 +11,9 @@ jobs:
     permissions:
       contents: write
       id-token: write # OIDC for npm trusted publishing and MCP Registry login
+    defaults:
+      run:
+        working-directory: packages/connector
 
     steps:
       - name: Checkout code
@@ -27,6 +30,7 @@ jobs:
           cache: "pnpm"
 
       - name: Install dependencies
+        working-directory: .
         run: pnpm install --frozen-lockfile
 
       - name: Validate

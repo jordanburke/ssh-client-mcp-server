@@ -1,85 +1,20 @@
 {
-  "name": "ssh-client-mcp-server",
-  "license": "MIT",
-  "version": "1.5.1",
-  "description": "MCP server that exposes SSH command execution to LLMs. Config parsing (functype), path expansion (~, $VAR), and OS-user fallback.",
-  "author": "Jordan Burke <jordan.burke@gmail.com>",
-  "homepage": "https://github.com/jordanburke/ssh-client-mcp-server#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/jordanburke/ssh-client-mcp-server.git"
-  },
-  "bugs": {
-    "url": "https://github.com/jordanburke/ssh-client-mcp-server/issues"
-  },
-  "keywords": [
-    "mcp",
-    "ssh",
-    "ssh2",
-    "model-context-protocol",
-    "claude",
-    "anthropic",
-    "llm",
-    "remote-shell",
-    "somamcp",
-    "fastmcp",
-    "functype",
-    "typescript",
-    "cli"
-  ],
-  "mcpName": "io.github.jordanburke/ssh-client-mcp-server",
-  "engines": {
-    "node": ">=22"
-  },
+  "name": "ssh-mcp-monorepo",
+  "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
-  },
-  "bin": {
-    "ssh-client-mcp-server": "dist/index.js"
-  },
-  "files": [
-    "lib",
-    "dist"
-  ],
+  "packageManager": "pnpm@11.5.2+sha512.71c631e382066efc25625d5cf029075de07b61b37f6e27350fbd84b1bda5864c8c1967adc280776b45c30a715c0359a3be08fef42d5bb09e2b99029979692916",
+  "engines": { "node": ">=22" },
   "scripts": {
-    "validate": "ts-builds validate",
-    "format": "ts-builds format",
-    "format:check": "ts-builds format:check",
-    "lint": "ts-builds lint",
-    "lint:check": "ts-builds lint:check",
-    "typecheck": "ts-builds typecheck",
-    "test": "ts-builds test",
-    "test:watch": "ts-builds test:watch",
-    "test:coverage": "ts-builds test:coverage",
-    "test:ui": "ts-builds test:ui",
-    "build": "ts-builds build",
-    "dev": "ts-builds dev",
-    "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js",
-    "check:versions": "tsx scripts/check-versions.ts",
-    "prepublishOnly": "pnpm check:versions && pnpm validate"
-  },
-  "prettier": "ts-builds/prettier",
-  "dependencies": {
-    "functype": "^1.5.0",
-    "functype-os": "^1.5.0",
-    "somamcp": "^1.0.15",
-    "ssh2": "^1.17.0",
-    "zod": "^4.4.3"
+    "validate": "pnpm -r validate",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format",
+    "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
-    "@types/node": "^24.13.2",
-    "@types/ssh2": "^1.15.5",
-    "ts-builds": "^3.2.1",
-    "tsdown": "^0.22.3",
+    "ts-builds": "^3.0.1",
+    "tsdown": "^0.22.2",
     "tsx": "^4.22.4"
-  },
-  "packageManager": "pnpm@11.9.0+sha512.bd682d5d03fe525ef7c9fd6780c6884d1e756ac4c9c9fe00c538782824310dcf90e3ddc4f53835f06dfaebd5085e41855e0bcbb3b60de2ac5bbab89e5036f03b"
+  }
 }

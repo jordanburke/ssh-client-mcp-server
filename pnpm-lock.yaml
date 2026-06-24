@@ -7,6 +7,18 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      ts-builds:
+        specifier: ^3.0.1
+        version: 3.2.1(@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(eslint@10.5.0)(typescript@6.0.3))(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(tsdown@0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4))
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13))
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+
+  packages/connector:
     dependencies:
       functype:
         specifier: ^1.5.0
@@ -3267,7 +3279,7 @@ snapshots:
       obug: 2.1.3
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.9(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))
+      vitest: 4.1.9(@types/node@24.10.15)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4))
 
   '@vitest/expect@4.1.9':
     dependencies:
@@ -3277,6 +3289,14 @@ snapshots:
       '@vitest/utils': 4.1.9
       chai: 6.2.2
       tinyrainbow: 3.1.0
+
+  '@vitest/mocker@4.1.9(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4))':
+    dependencies:
+      '@vitest/spy': 4.1.9
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 7.3.2(@types/node@24.10.15)(tsx@4.22.4)
 
   '@vitest/mocker@4.1.9(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))':
     dependencies:
@@ -3313,7 +3333,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vitest: 4.1.9(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))
+      vitest: 4.1.9(@types/node@24.10.15)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4))
 
   '@vitest/utils@4.1.9':
     dependencies:
@@ -4605,6 +4625,48 @@ snapshots:
     dependencies:
       typescript: 6.0.3
 
+  ts-builds@3.2.1(@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(eslint@10.5.0)(typescript@6.0.3))(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(tsdown@0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4)):
+    dependencies:
+      '@eslint/js': 10.0.1(eslint@10.5.0)
+      '@types/node': 24.10.15
+      '@vitest/coverage-v8': 4.1.9(vitest@4.1.9)
+      '@vitest/ui': 4.1.9(vitest@4.1.9)
+      eslint: 10.5.0
+      eslint-config-functype: 2.105.0(@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(eslint@10.5.0)(typescript@6.0.3))(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(eslint-plugin-prettier@5.5.6(eslint-config-prettier@10.1.8(eslint@10.5.0))(eslint@10.5.0)(prettier@3.8.4))(eslint-plugin-simple-import-sort@13.0.0(eslint@10.5.0))(eslint@10.5.0)(prettier@3.8.4)
+      eslint-config-prettier: 10.1.8(eslint@10.5.0)
+      eslint-plugin-functype: 2.105.0(eslint@10.5.0)
+      eslint-plugin-prettier: 5.5.6(eslint-config-prettier@10.1.8(eslint@10.5.0))(eslint@10.5.0)(prettier@3.8.4)
+      eslint-plugin-simple-import-sort: 13.0.0(eslint@10.5.0)
+      functype: 1.5.0
+      functype-os: 1.5.0(functype@1.5.0)
+      globals: 17.7.0
+      prettier: 3.8.4
+      ts-node: 10.9.2(@types/node@24.10.15)(typescript@6.0.3)
+      typescript: 6.0.3
+      typescript-eslint: 8.62.0(eslint@10.5.0)(typescript@6.0.3)
+      vitest: 4.1.9(@types/node@24.10.15)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4))
+    optionalDependencies:
+      tsdown: 0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13))
+      vite: 7.3.2(@types/node@24.10.15)(tsx@4.22.4)
+    transitivePeerDependencies:
+      - '@edge-runtime/vm'
+      - '@opentelemetry/api'
+      - '@swc/core'
+      - '@swc/wasm'
+      - '@types/eslint'
+      - '@typescript-eslint/eslint-plugin'
+      - '@typescript-eslint/parser'
+      - '@vitest/browser'
+      - '@vitest/browser-playwright'
+      - '@vitest/browser-preview'
+      - '@vitest/browser-webdriverio'
+      - '@vitest/coverage-istanbul'
+      - happy-dom
+      - jiti
+      - jsdom
+      - msw
+      - supports-color
+
   ts-builds@3.2.1(@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(eslint@10.5.0)(typescript@6.0.3))(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(tsdown@0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4)):
     dependencies:
       '@eslint/js': 10.0.1(eslint@10.5.0)
@@ -4624,7 +4686,7 @@ snapshots:
       ts-node: 10.9.2(@types/node@24.10.15)(typescript@6.0.3)
       typescript: 6.0.3
       typescript-eslint: 8.62.0(eslint@10.5.0)(typescript@6.0.3)
-      vitest: 4.1.9(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))
+      vitest: 4.1.9(@types/node@24.10.15)(@vitest/coverage-v8@4.1.9(vitest@4.1.9))(@vitest/ui@4.1.9(vitest@4.1.9))(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))
     optionalDependencies:
       tsdown: 0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13))
       vite: 7.3.2(@types/node@24.13.2)(tsx@4.22.4)
@@ -4764,6 +4826,19 @@ snapshots:
 
   vary@1.1.2: {}
 
+  vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4):
+    dependencies:
+      esbuild: 0.27.7
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
+      postcss: 8.5.15
+      rollup: 4.62.2
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 24.10.15
+      fsevents: 2.3.3
+      tsx: 4.22.4
+
   vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4):
     dependencies:
       esbuild: 0.27.7
@@ -4777,7 +4852,7 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.22.4
 
-  vitest@4.1.9(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4)):
+  vitest@4.1.9(@types/node@24.10.15)(@vitest/coverage-v8@4.1.9(vitest@4.1.9))(@vitest/ui@4.1.9(vitest@4.1.9))(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4)):
     dependencies:
       '@vitest/expect': 4.1.9
       '@vitest/mocker': 4.1.9(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))
@@ -4800,7 +4875,36 @@ snapshots:
       vite: 7.3.2(@types/node@24.13.2)(tsx@4.22.4)
       why-is-node-running: 2.3.0
     optionalDependencies:
-      '@types/node': 24.13.2
+      '@types/node': 24.10.15
+      '@vitest/coverage-v8': 4.1.9(vitest@4.1.9)
+      '@vitest/ui': 4.1.9(vitest@4.1.9)
+    transitivePeerDependencies:
+      - msw
+
+  vitest@4.1.9(@types/node@24.10.15)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4)):
+    dependencies:
+      '@vitest/expect': 4.1.9
+      '@vitest/mocker': 4.1.9(vite@7.3.2(@types/node@24.10.15)(tsx@4.22.4))
+      '@vitest/pretty-format': 4.1.9
+      '@vitest/runner': 4.1.9
+      '@vitest/snapshot': 4.1.9
+      '@vitest/spy': 4.1.9
+      '@vitest/utils': 4.1.9
+      es-module-lexer: 2.1.0
+      expect-type: 1.3.0
+      magic-string: 0.30.21
+      obug: 2.1.3
+      pathe: 2.0.3
+      picomatch: 4.0.4
+      std-env: 4.1.0
+      tinybench: 2.9.0
+      tinyexec: 1.2.4
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.0
+      vite: 7.3.2(@types/node@24.10.15)(tsx@4.22.4)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 24.10.15
       '@vitest/coverage-v8': 4.1.9(vitest@4.1.9)
       '@vitest/ui': 4.1.9(vitest@4.1.9)
     transitivePeerDependencies:

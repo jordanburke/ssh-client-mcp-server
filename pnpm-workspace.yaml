@@ -1,3 +1,6 @@
+packages:
+  - "packages/*"
+
 # Hoist CLI tool binaries from peer dependencies (migrated from .npmrc under pnpm 11)
 publicHoistPattern:
   - "*eslint*"
