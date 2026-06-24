@@ -1,0 +1,24 @@
+[defaults]
+port = 22
+user = "agent"
+tmux_session = "agent"
+
+[pool]
+max_per_host = 2
+idle_timeout_ms = 60000
+
+[[hosts]]
+name = "box-a"
+host = "10.0.0.11"
+user = "jordan"
+key = "~/.ssh/id_ed25519"
+
+[[hosts]]
+name = "box-b"
+host = "build.example.com"
+agent = true
+
+[[hosts]]
+name = "box-c"
+host = "192.168.1.50"
+password_env = "BOXC_SSH_PASSWORD"   # value read from the env var, never inline

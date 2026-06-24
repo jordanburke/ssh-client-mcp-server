@@ -20,6 +20,22 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) — a functional MCP
 - [Development](#development)
 - [Disclaimer](#disclaimer)
 
+## Monorepo
+
+This repository is a pnpm monorepo with three packages:
+
+| Package | npm name | Role |
+| ------- | -------- | ---- |
+| `packages/core` | `@ssh-mcp/core` (private) | Shared SSH pool, tmux command builders, and auth resolution. Bundled into the other packages; not published separately. |
+| `packages/connector` | `ssh-client-mcp-server` | Single-host MCP server (the original package). `exec` + `tmux_*` tools for one configured SSH host. |
+| `packages/orchestrator` | `ssh-fleet-mcp-server` | Multi-host fleet MCP server. Host-routed `exec` + `tmux_*` tools driven by a TOML fleet config. |
+
+Run the full validation suite across all packages:
+
+```bash
+pnpm -r validate
+```
+
 ## Quick Start
 
 1. Configure your MCP client (Claude Desktop, Cursor, Cline, etc.) to launch this server via `npx` — see [Client Setup](#client-setup).
