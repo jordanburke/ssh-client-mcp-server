@@ -20,6 +20,9 @@ importers:
 
   packages/connector:
     dependencies:
+      '@ssh-mcp/core':
+        specifier: workspace:*
+        version: link:../core
       functype:
         specifier: ^1.5.0
         version: 1.5.0
@@ -51,6 +54,34 @@ importers:
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
+
+  packages/core:
+    dependencies:
+      functype:
+        specifier: ^1.3.1
+        version: 1.5.0
+      functype-os:
+        specifier: ^1.3.1
+        version: 1.5.0(functype@1.5.0)
+      somamcp:
+        specifier: ^1.0.12
+        version: 1.0.15
+      ssh2:
+        specifier: ^1.17.0
+        version: 1.17.0
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.1
+        version: 24.13.2
+      '@types/ssh2':
+        specifier: ^1.15.5
+        version: 1.15.5
+      ts-builds:
+        specifier: ^3.0.1
+        version: 3.2.1(@typescript-eslint/eslint-plugin@8.62.0(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(eslint@10.5.0)(typescript@6.0.3))(@typescript-eslint/parser@8.62.0(eslint@10.5.0)(typescript@6.0.3))(tsdown@0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13)))(vite@7.3.2(@types/node@24.13.2)(tsx@4.22.4))
+      tsdown:
+        specifier: ^0.22.2
+        version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)(unrun@0.2.39(synckit@0.11.13))
 
 packages:
 

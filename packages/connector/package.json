@@ -68,6 +68,7 @@
   },
   "prettier": "ts-builds/prettier",
   "dependencies": {
+    "@ssh-mcp/core": "workspace:*",
     "functype": "^1.5.0",
     "functype-os": "^1.5.0",
     "somamcp": "^1.0.15",
