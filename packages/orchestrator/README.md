@@ -111,7 +111,7 @@ List configured fleet hosts and their live connection-pool status.
 
 Parameters: none.
 
-Returns a JSON array of `{ name, host, status }` objects.
+Returns a JSON array of `{ name, state, inFlight }` objects, where `state` is one of `"connected"`, `"idle"`, or `"disconnected"`, and `inFlight` is the count of currently active connections to that host.
 
 ### `exec`
 

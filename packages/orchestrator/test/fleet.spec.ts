@@ -30,6 +30,7 @@ ${base}`)
 
   it("defaults port 22 and tmux_session 'agent'", () => {
     const r = parseFleet(base)
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) {
       expect(r.value.hosts[0].port).toBe(22)
       expect(r.value.hosts[0].tmuxSession).toBe("agent")
@@ -38,6 +39,7 @@ ${base}`)
 
   it("reads pool settings with defaults", () => {
     const r = parseFleet(base)
+    expect(r.isRight()).toBe(true)
     if (r.isRight()) {
       expect(r.value.pool.maxPerHost).toBe(2)
       expect(r.value.pool.idleTimeoutMs).toBe(60000)
@@ -76,6 +78,17 @@ agent = true
 name = "x"
 host = "1.2.3.4"
 password = "hunter2"
+`)
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain("must not be inline")
+  })
+
+  it("rejects an inline private_key literal (secrets must be by reference)", () => {
+    const r = parseFleet(`
+[[hosts]]
+name = "x"
+host = "1.2.3.4"
+private_key = "-----BEGIN OPENSSH PRIVATE KEY-----"
 `)
     expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain("must not be inline")

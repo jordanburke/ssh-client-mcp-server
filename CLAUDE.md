@@ -38,10 +38,9 @@ Within any package:
 Shared logic consumed by both servers. Not published; bundled by tsdown into each server's `dist/`.
 
 - **`pool.ts`** — `createPool(hosts, opts, factory?)` returns a `Pool` with per-host SSH connection pooling (concurrency cap, idle eviction, acquire timeout, reconnect-once, graceful shutdown).
-- **`tmux.ts`** — Pure tmux command builders and result interpreters: `tmuxList`, `tmuxSend`, `tmuxRead`, `tmuxKeys`. All accept a `TmuxRunner` (a thin `(cmd: string) => Promise<CommandResult>` function).
+- **`tmux.ts`** — Pure tmux command builders and result interpreters: `tmuxList`, `tmuxSend`, `tmuxRead`, `tmuxKeys`. All accept a `TmuxRunner` (a thin `(cmd: string) => Promise<CommandResult>` function). Also exports `validateSession` and `validateKey` for session-name and key validation.
 - **`auth.ts`** — `resolveAuth(opts)` resolves the four auth modes (key file, key env var, ssh-agent, password env) into an `ssh2` `ConnectConfig` fragment.
 - **`ssh.ts`** — Low-level SSH exec over an `ssh2` connection.
-- **`config.ts`** — `validateSession` for name validation.
 
 ### `ssh-client-mcp-server` (`packages/connector`)
 
