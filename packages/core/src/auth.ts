@@ -33,14 +33,16 @@ export const resolveAuth = async (options: ResolveAuthOptions): Promise<Either<s
     const varName = options.keyEnvVar.value
     const keyValue = process.env[varName]
     if (!keyValue) {
-      return Left<string, Partial<ConnectConfig>>(`key-env ${varName} but environment variable is not set or empty`)
+      return Left<string, Partial<ConnectConfig>>(`--key-env=${varName} but environment variable is not set or empty`)
     }
     return Right<string, Partial<ConnectConfig>>({ privateKey: keyValue })
   }
   if (options.useAgent) {
     const sock = process.env.SSH_AUTH_SOCK
     if (!sock) {
-      return Left<string, Partial<ConnectConfig>>("agent set but SSH_AUTH_SOCK is not set")
+      return Left<string, Partial<ConnectConfig>>(
+        "--agent set but SSH_AUTH_SOCK is not set; start ssh-agent or unlock your password manager's SSH agent",
+      )
     }
     return Right<string, Partial<ConnectConfig>>({ agent: sock })
   }
