@@ -1271,6 +1271,7 @@ Factor the tool handlers into a testable `makeHandlers(runner: FleetRunner)` so 
 
 ```ts
 // packages/orchestrator/test/ops.spec.ts
+import { Right } from "functype"
 import { describe, expect, it } from "vitest"
 import { type CommandResult } from "@ssh-mcp/core"
 
@@ -1282,8 +1283,7 @@ const recording = () => {
   const runner: FleetRunner = {
     hostNames: ["box-a", "box-b"],
     sessionFor: () => "agent",
-    tmuxRunnerFor: (host) =>
-      ({ isRight: () => true, isLeft: () => false, value: (command: string) => run(host, command) }) as never,
+    tmuxRunnerFor: (host) => Right((command: string) => run(host, command)),
     exec: (host, command) => run(host, command),
     status: () => [
       { name: "box-a", state: "idle", inFlight: 0 },
@@ -1343,10 +1343,11 @@ Expected: FAIL — cannot resolve `../src/index.js` / `makeHandlers` not exporte
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-import { type Either, Option } from "functype"
+import { type Either } from "functype"
 import { createServer, UserError } from "somamcp"
 import { z } from "zod"
 import { tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "@ssh-mcp/core"
@@ -1354,8 +1355,9 @@ import { tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "@ssh-mcp/core"
 import { parseFleet } from "./fleet.js"
 import { buildFleetRunner, type FleetRunner } from "./runners.js"
 
-const { version: pkgVersion } = (await import("node:module"))
-  .createRequire(import.meta.url)("../package.json") as { version: `${number}.${number}.${number}` }
+const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
+  version: `${number}.${number}.${number}`
+}
 
 const unwrap = <T>(result: Either<string, T>): T =>
   result.fold(
