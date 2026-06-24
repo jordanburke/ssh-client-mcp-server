@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jordanburke/ssh-fleet-mcp-server",
+  "description": "MCP server that manages a fleet of SSH hosts via pooled connections.",
+  "repository": { "url": "https://github.com/jordanburke/ssh-client-mcp-server", "source": "github" },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "ssh-fleet-mcp-server",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "packageArguments": [
+        { "type": "named", "name": "--config", "description": "Path to fleet TOML config", "isRequired": false, "format": "filepath", "isSecret": false }
+      ]
+    }
+  ]
+}

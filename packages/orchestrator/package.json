@@ -1,0 +1,43 @@
+{
+  "name": "ssh-fleet-mcp-server",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "MCP server that manages a fleet of SSH hosts: pooled connections and host-routed exec/tmux tools.",
+  "author": "Jordan Burke <jordan.burke@gmail.com>",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" } },
+  "bin": { "ssh-fleet-mcp-server": "dist/index.js" },
+  "files": ["lib", "dist"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "validate": "ts-builds validate",
+    "format": "ts-builds format",
+    "format:check": "ts-builds format:check",
+    "lint": "ts-builds lint",
+    "lint:check": "ts-builds lint:check",
+    "typecheck": "ts-builds typecheck",
+    "test": "ts-builds test",
+    "build": "ts-builds build",
+    "dev": "ts-builds dev",
+    "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js"
+  },
+  "prettier": "ts-builds/prettier",
+  "dependencies": {
+    "@ssh-mcp/core": "workspace:*",
+    "functype": "^1.3.1",
+    "functype-os": "^1.3.1",
+    "smol-toml": "^1.3.1",
+    "somamcp": "^1.0.12",
+    "ssh2": "^1.17.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "@types/ssh2": "^1.15.5",
+    "ts-builds": "^3.0.1",
+    "tsdown": "^0.22.2"
+  }
+}
