@@ -1,5 +1,5 @@
-import { type Either, Left, List, Option, Right } from "functype"
 import { type ResolveAuthOptions, validateSession } from "@ssh-mcp/core"
+import { type Either, Left, List, Option, Right, Try } from "functype"
 import { parse as parseToml } from "smol-toml"
 
 export type HostEntry = Readonly<{
@@ -23,7 +23,9 @@ const num = (v: unknown): Option<number> => (typeof v === "number" ? Option(v) :
 // Exactly-one-auth + secrets-by-reference. Returns the auth options or an error string.
 const resolveHostAuth = (name: string, h: RawHost): Either<string, ResolveAuthOptions> => {
   if (h.password !== undefined || h.private_key !== undefined) {
-    return Left<string, ResolveAuthOptions>(`host "${name}": secrets must not be inline; use key/key_env/agent/password_env`)
+    return Left<string, ResolveAuthOptions>(
+      `host "${name}": secrets must not be inline; use key/key_env/agent/password_env`,
+    )
   }
   const modes = [
     str(h.key).map(() => "key"),
@@ -31,10 +33,16 @@ const resolveHostAuth = (name: string, h: RawHost): Either<string, ResolveAuthOp
     str(h.password_env).map(() => "password_env"),
     h.agent === true ? Option("agent") : Option.none<string>(),
   ].filter((o) => o.isSome())
-  if (modes.length === 0) return Left<string, ResolveAuthOptions>(`host "${name}": no auth mode (need exactly one of key/key_env/agent/password_env)`)
-  if (modes.length > 1) return Left<string, ResolveAuthOptions>(`host "${name}": exactly one auth mode allowed, found ${modes.length}`)
+  if (modes.length === 0)
+    return Left<string, ResolveAuthOptions>(
+      `host "${name}": no auth mode (need exactly one of key/key_env/agent/password_env)`,
+    )
+  if (modes.length > 1)
+    return Left<string, ResolveAuthOptions>(`host "${name}": exactly one auth mode allowed, found ${modes.length}`)
   return Right<string, ResolveAuthOptions>({
-    password: str(h.password_env).flatMap((v) => Option(process.env[v] ?? "")).filter((v) => v.length > 0),
+    password: str(h.password_env)
+      .flatMap((v) => Option(process.env[v] ?? ""))
+      .filter((v) => v.length > 0),
     keyPath: str(h.key),
     keyEnvVar: str(h.key_env),
     useAgent: h.agent === true,
@@ -51,12 +59,9 @@ const parsePool = (raw: Record<string, unknown>): PoolSettings => {
 }
 
 export const parseFleet = (toml: string): Either<string, Fleet> => {
-  let raw: Record<string, unknown>
-  try {
-    raw = parseToml(toml) as Record<string, unknown>
-  } catch (e) {
-    return Left<string, Fleet>(`Invalid TOML: ${(e as Error).message}`)
-  }
+  const parsed = Try(() => parseToml(toml) as Record<string, unknown>)
+  if (parsed.isFailure()) return Left<string, Fleet>(`Invalid TOML: ${(parsed.error as Error).message}`)
+  const raw = parsed.orThrow()
 
   const defaults = (raw.defaults ?? {}) as Record<string, unknown>
   const defaultPort = num(defaults.port).orElse(22)

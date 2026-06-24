@@ -1,4 +1,3 @@
-import { type Either, Left, Right } from "functype"
 import {
   type CommandResult,
   type ConnectFactory,
@@ -7,6 +6,7 @@ import {
   resolveAuth,
   type TmuxRunner,
 } from "@ssh-mcp/core"
+import { type Either, Left, Right } from "functype"
 import { type ConnectConfig } from "ssh2"
 
 import { type Fleet, type HostEntry } from "./fleet.js"

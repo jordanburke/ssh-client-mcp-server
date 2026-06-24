@@ -45,7 +45,8 @@ describe("buildFleetRunner", () => {
       expect(r.value.sessionFor("box-a")).toBe("sess-a")
       const tr = r.value.tmuxRunnerFor("box-a")
       expect(tr.isRight()).toBe(true)
-      if (tr.isRight()) expect(await tr.value("tmux list-sessions")).toEqual({ stdout: "out:tmux list-sessions", stderr: "", code: 0 })
+      if (tr.isRight())
+        expect(await tr.value("tmux list-sessions")).toEqual({ stdout: "out:tmux list-sessions", stderr: "", code: 0 })
       await r.value.shutdown()
     }
   })

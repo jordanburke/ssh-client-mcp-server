@@ -8,10 +8,23 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" } },
-  "bin": { "ssh-fleet-mcp-server": "dist/index.js" },
-  "files": ["lib", "dist"],
-  "engines": { "node": ">=22" },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "ssh-fleet-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "lib",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "validate": "ts-builds validate",
     "format": "ts-builds format",
