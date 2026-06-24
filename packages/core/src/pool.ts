@@ -30,8 +30,6 @@ type HostState = {
   idleTimer?: ReturnType<typeof setTimeout>
 }
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
-
 // Default factory: a persistent ssh2 client; exec runs each command on its own channel.
 export const defaultConnect: ConnectFactory = (sshConfig) =>
   new Promise<PooledConnection>((resolve, reject) => {
@@ -107,20 +105,39 @@ export const createPool = (
       st.inFlight++
       return
     }
-    await Promise.race([
-      new Promise<void>((resolve) => st.waiters.push(resolve)),
-      wait(opts.acquireTimeoutMs).then(() => {
-        throw new Error(`host "${st.name}" busy: no free connection slot after ${opts.acquireTimeoutMs}ms`)
-      }),
-    ])
-    st.inFlight++
+    const refs: { release: (() => void) | undefined; timer: ReturnType<typeof setTimeout> | undefined } = {
+      release: undefined,
+      timer: undefined,
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        refs.release = resolve
+        st.waiters.push(resolve)
+        refs.timer = setTimeout(
+          () => reject(new Error(`host "${st.name}" busy: no free connection slot after ${opts.acquireTimeoutMs}ms`)),
+          opts.acquireTimeoutMs,
+        )
+      })
+      // Woken by releaseSlot: the slot was transferred to us, so inFlight already counts it.
+    } catch (e) {
+      if (refs.release) {
+        const idx = st.waiters.indexOf(refs.release)
+        if (idx !== -1) st.waiters.splice(idx, 1)
+      }
+      throw e
+    } finally {
+      if (refs.timer) clearTimeout(refs.timer)
+    }
   }
 
   const releaseSlot = (st: HostState): void => {
-    st.inFlight--
     const next = st.waiters.shift()
-    if (next) next()
-    else if (st.inFlight === 0 && st.conn) {
+    if (next) {
+      next() // transfer the slot to the waiter; inFlight is unchanged (count carries over)
+      return
+    }
+    st.inFlight--
+    if (st.inFlight === 0 && st.conn) {
       st.idleTimer = setTimeout(() => {
         st.conn?.close()
         dropConn(st)
