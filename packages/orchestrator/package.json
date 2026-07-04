@@ -43,7 +43,7 @@
     "functype": "^1.3.1",
     "functype-os": "^1.3.1",
     "smol-toml": "^1.3.1",
-    "somamcp": "^1.0.12",
+    "somamcp": "^1.1.0",
     "ssh2": "^1.17.0",
     "zod": "^4.4.3"
   },

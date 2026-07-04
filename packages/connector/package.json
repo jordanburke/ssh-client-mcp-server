@@ -71,7 +71,7 @@
     "@ssh-mcp/core": "workspace:*",
     "functype": "^1.5.0",
     "functype-os": "^1.5.0",
-    "somamcp": "^1.0.15",
+    "somamcp": "^1.1.0",
     "ssh2": "^1.17.0",
     "zod": "^4.4.3"
   },
