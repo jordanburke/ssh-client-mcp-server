@@ -15,6 +15,7 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) and the shared `@ssh
 - [Auth Modes](#auth-modes)
 - [Secrets-by-Reference Rule](#secrets-by-reference-rule)
 - [Tools](#tools)
+- [Audit Log](#audit-log)
 - [Client Setup](#client-setup)
 - [Development](#development)
 
@@ -171,6 +172,32 @@ Send control/special keys (e.g. `C-c`) to a tmux session on a fleet host.
 | `host`    | string   | yes      | Configured host name.                                      |
 | `session` | string   | no       | tmux session name (defaults to the host's `tmux_session`). |
 | `keys`    | string[] | yes      | tmux key names, e.g. `["C-c"]`.                            |
+
+## Audit Log
+
+Every tool call writes two JSON lines to the audit log (see [`[audit]`](#audit-optional)): a `decision` line **before** the call runs and a `result` line after it, sharing `id`. A call that hangs or crashes the server is still on record.
+
+```json
+{"ts":"2026-10-17T14:02:11.000Z","id":"5f0c…","event":"decision","agent":"unknown","tool":"exec","host":"box-a","command":"systemctl status cups","decision":"allow"}
+{"ts":"2026-10-17T14:02:11.412Z","id":"5f0c…","event":"result","agent":"unknown","tool":"exec","host":"box-a","status":"ok","ms":412,"code":0,"stdout_bytes":1830,"stderr_bytes":0}
+```
+
+What each tool records:
+
+| Tool         | Decision line                | Result line                                                                           |
+| ------------ | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `hosts_list` | (no `host`)                  | —                                                                                     |
+| `exec`       | `command`                    | `code`, `stdout_bytes`, `stderr_bytes`; plus excerpts when the host sets `log_output` |
+| `tmux_list`  | —                            | —                                                                                     |
+| `tmux_send`  | `session`, `input`, `submit` | —                                                                                     |
+| `tmux_read`  | `session`, `lines`           | `stdout_bytes` (never the transcript)                                                 |
+| `tmux_keys`  | `session`, `keys`            | —                                                                                     |
+
+- **Sizes, not contents.** Output can contain secrets, so only byte counts are logged. A host with `log_output = true` also gets `stdout_excerpt` / `stderr_excerpt` (first 1024 characters) on `exec`.
+- **`status`** is `"ok"` when the call completed (an `exec` with a non-zero exit is still `"ok"`, with its `code`) and `"error"` with an `error` message when it didn't, for example an unknown host.
+- **`agent`** is `"unknown"` until per-agent identity lands; `decision` is always `"allow"` until per-host policy lands.
+- **No unaudited calls.** The server refuses to start if the log can't be written, and a call whose audit line can't be written fails.
+- **Append-only is best effort** — the server's user can truncate its own file. For stronger integrity, set the OS append-only flag from an administrator account: `sudo chattr +a <file>` (Linux) or `sudo chflags uappend <file>` (macOS). Rotation is out of scope.
 
 ## Example Config
 
