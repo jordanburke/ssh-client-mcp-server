@@ -45,3 +45,6 @@ node_modules/
 
 # Local MCP test harness (points at a specific SSH host; never commit)
 .mcp.json
+
+# ts-builds generated reports
+.ts-builds/

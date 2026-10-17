@@ -6,7 +6,7 @@ import {
   resolveAuth,
   type TmuxRunner,
 } from "@ssh-mcp/core"
-import { type Either, Left, Right } from "functype"
+import { Either, Left, Map, Right, Set } from "functype"
 import { type ConnectConfig } from "ssh2"
 
 import { type Fleet, type HostEntry } from "./fleet.js"
@@ -34,21 +34,28 @@ export const buildFleetRunner = async (
   fleet: Fleet,
   connect?: ConnectFactory,
 ): Promise<Either<string, FleetRunner>> => {
-  const resolved: Array<{ name: string; sshConfig: ConnectConfig }> = []
-  const sessions = new Map<string, string>()
-  for (const h of fleet.hosts) {
+  const resolved = await Either.traverseAsync(fleet.hosts, async (h) => {
     const cfg = await toSshConfig(h)
-    if (cfg.isLeft()) return Left<string, FleetRunner>(`host "${h.name}": ${cfg.value}`)
-    resolved.push({ name: h.name, sshConfig: cfg.value })
-    sessions.set(h.name, h.tmuxSession)
-  }
+    return cfg.fold(
+      (e) => Left<string, { name: string; sshConfig: ConnectConfig }>(`host "${h.name}": ${e}`),
+      (sshConfig) => Right<string, { name: string; sshConfig: ConnectConfig }>({ name: h.name, sshConfig }),
+    )
+  })
+  return resolved.map((hosts) => makeRunner(fleet, hosts, connect))
+}
 
+const makeRunner = (
+  fleet: Fleet,
+  resolved: ReadonlyArray<{ name: string; sshConfig: ConnectConfig }>,
+  connect?: ConnectFactory,
+): FleetRunner => {
+  const sessions = Map.of(...fleet.hosts.map((h): [string, string] => [h.name, h.tmuxSession]))
   const pool = createPool(resolved, fleet.pool, connect)
-  const names = new Set(resolved.map((r) => r.name))
+  const names = Set.of(...resolved.map((r) => r.name))
 
-  return Right<string, FleetRunner>({
+  return {
     hostNames: [...names],
-    sessionFor: (host) => sessions.get(host) ?? "agent",
+    sessionFor: (host) => sessions.get(host).orElse("agent"),
     tmuxRunnerFor: (host) =>
       names.has(host)
         ? Right<string, TmuxRunner>((command) => pool.run(host, command))
@@ -56,5 +63,5 @@ export const buildFleetRunner = async (
     exec: (host, command) => pool.run(host, command),
     status: () => pool.status(),
     shutdown: () => pool.shutdown(),
-  })
+  }
 }

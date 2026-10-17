@@ -20,15 +20,15 @@
   },
   "prettier": "ts-builds/prettier",
   "dependencies": {
-    "functype": "^1.3.1",
-    "functype-os": "^1.3.1",
-    "somamcp": "^1.0.12",
+    "functype": "^1.16.0",
+    "functype-os": "^1.16.0",
+    "somamcp": "^1.4.1",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
-    "@types/node": "^24.13.1",
-    "@types/ssh2": "^1.15.5",
-    "ts-builds": "^3.0.1",
-    "tsdown": "^0.22.2"
+    "@types/node": "^24.19.2",
+    "@types/ssh2": "^1.15.6",
+    "ts-builds": "^3.4.3",
+    "tsdown": "^0.22.14"
   }
 }

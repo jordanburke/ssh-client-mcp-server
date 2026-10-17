@@ -1,3 +1,4 @@
+import { Map } from "functype"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 
 import { type CommandResult } from "./tmux.js"
@@ -70,9 +71,14 @@ export const createPool = (
   opts: PoolOptions,
   connect: ConnectFactory = defaultConnect,
 ): Pool => {
-  const states = new Map<string, HostState>(
-    hosts.map((h) => [h.name, { name: h.name, sshConfig: h.sshConfig, inFlight: 0, waiters: [] }]),
+  const states = Map.of<string, HostState>(
+    ...hosts.map((h): [string, HostState] => [
+      h.name,
+      { name: h.name, sshConfig: h.sshConfig, inFlight: 0, waiters: [] },
+    ]),
   )
+
+  const allStates = (): HostState[] => [...states].map(([, st]) => st)
 
   const dropConn = (st: HostState): void => {
     st.conn = undefined
@@ -146,8 +152,7 @@ export const createPool = (
   }
 
   const run = async (hostName: string, command: string): Promise<CommandResult> => {
-    const st = states.get(hostName)
-    if (!st) throw new Error(`unknown host "${hostName}"`)
+    const st = states.get(hostName).orThrow(new Error(`unknown host "${hostName}"`))
     if (st.idleTimer) {
       clearTimeout(st.idleTimer)
       st.idleTimer = undefined
@@ -169,14 +174,14 @@ export const createPool = (
   }
 
   const status = (): HostStatus[] =>
-    [...states.values()].map((st) => ({
+    allStates().map((st) => ({
       name: st.name,
       state: st.conn ? (st.inFlight > 0 ? "connected" : "idle") : "disconnected",
       inFlight: st.inFlight,
     }))
 
   const shutdown = (): Promise<void> => {
-    states.forEach((st) => {
+    allStates().forEach((st) => {
       if (st.idleTimer) clearTimeout(st.idleTimer)
       st.conn?.close()
       dropConn(st)

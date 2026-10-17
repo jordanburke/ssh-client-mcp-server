@@ -71,39 +71,37 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
 
   if (rawHosts.length === 0) return Left<string, Fleet>("Fleet config has no [[hosts]] entries")
 
-  const seen = new Set<string>()
-  const errors: string[] = []
-  const hosts: HostEntry[] = []
-
-  for (const h of rawHosts) {
+  const names = rawHosts.map((h) => str(h.name).orElse(""))
+  const parseHost = (h: RawHost, index: number): Either<string, HostEntry> => {
     const name = str(h.name).orElse("")
-    if (!validateSession(name).isRight()) {
-      errors.push(`invalid host name "${name}": only letters, digits, hyphen, underscore`)
-      continue
-    }
-    if (seen.has(name)) {
-      errors.push(`duplicate host name "${name}"`)
-      continue
-    }
-    seen.add(name)
+    if (!validateSession(name).isRight())
+      return Left<string, HostEntry>(`invalid host name "${name}": only letters, digits, hyphen, underscore`)
+    if (names.indexOf(name) < index) return Left<string, HostEntry>(`duplicate host name "${name}"`)
     const address = str(h.host)
-    if (address.isNone()) {
-      errors.push(`host "${name}": missing host address`)
-      continue
-    }
-    resolveHostAuth(name, h).fold(
-      (msg) => errors.push(msg),
-      (auth) =>
-        hosts.push({
-          name,
-          host: address.orElse(""),
-          port: num(h.port).orElse(defaultPort),
-          user: str(h.user).or(defaultUser),
-          auth,
-          tmuxSession: str(h.tmux_session).orElse(defaultSession),
-        }),
-    )
+    if (address.isNone()) return Left<string, HostEntry>(`host "${name}": missing host address`)
+    return resolveHostAuth(name, h).map((auth) => ({
+      name,
+      host: address.orElse(""),
+      port: num(h.port).orElse(defaultPort),
+      user: str(h.user).or(defaultUser),
+      auth,
+      tmuxSession: str(h.tmux_session).orElse(defaultSession),
+    }))
   }
+
+  const results = rawHosts.map(parseHost)
+  const errors = results.flatMap((r) =>
+    r.fold<string[]>(
+      (msg) => [msg],
+      () => [],
+    ),
+  )
+  const hosts = results.flatMap((r) =>
+    r.fold<HostEntry[]>(
+      () => [],
+      (entry) => [entry],
+    ),
+  )
 
   return errors.length > 0
     ? Left<string, Fleet>(`Fleet config errors:\n${List(errors).toArray().join("\n")}`)

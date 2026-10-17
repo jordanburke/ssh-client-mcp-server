@@ -15,8 +15,8 @@
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
-    "ts-builds": "^3.2.1",
-    "tsdown": "^0.22.3",
-    "tsx": "^4.22.4"
+    "ts-builds": "^3.4.3",
+    "tsdown": "^0.22.14",
+    "tsx": "^4.23.15"
   }
 }
