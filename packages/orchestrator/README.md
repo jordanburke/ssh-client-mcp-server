@@ -36,7 +36,7 @@ If the config file cannot be read, or if it contains validation errors, the serv
 
 ## Fleet Config Schema
 
-The fleet config is a [TOML](https://toml.io) file with three top-level sections.
+The fleet config is a [TOML](https://toml.io) file with four top-level sections.
 
 ### `[defaults]` (optional)
 
@@ -58,21 +58,30 @@ Controls the shared per-host connection pool.
 | `idle_timeout_ms`    | int  | `60000` | Idle connection eviction interval (ms).                           |
 | `acquire_timeout_ms` | int  | `30000` | How long to wait for a pool slot before failing a tool call (ms). |
 
+### `[audit]` (optional)
+
+Where the audit log is written. See [Audit Log](#audit-log).
+
+| Key    | Type   | Default                                | Description                                                         |
+| ------ | ------ | -------------------------------------- | ------------------------------------------------------------------- |
+| `path` | string | `~/.local/state/ssh-fleet/audit.jsonl` | Audit log file (supports `~` and `$VAR`). Created with mode `0600`. |
+
 ### `[[hosts]]` (required, one or more)
 
 Each `[[hosts]]` entry defines a remote machine. Host names must be unique and may contain only letters, digits, hyphens, and underscores.
 
-| Key            | Type   | Required | Description                                                        |
-| -------------- | ------ | -------- | ------------------------------------------------------------------ |
-| `name`         | string | yes      | Logical name used as the `host` param in tool calls.               |
-| `host`         | string | yes      | Hostname or IP address.                                            |
-| `port`         | int    | no       | Overrides `[defaults].port`.                                       |
-| `user`         | string | no       | Overrides `[defaults].user`.                                       |
-| `tmux_session` | string | no       | Overrides `[defaults].tmux_session`.                               |
-| `key`          | string | no\*     | Path to private SSH key (supports `~` and `$VAR`).                 |
-| `key_env`      | string | no\*     | Name of env var holding the private key PEM.                       |
-| `agent`        | bool   | no\*     | `true` to use `SSH_AUTH_SOCK` (ssh-agent / 1Password / Bitwarden). |
-| `password_env` | string | no\*     | Name of env var holding the SSH password.                          |
+| Key            | Type   | Required | Description                                                                                                        |
+| -------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `name`         | string | yes      | Logical name used as the `host` param in tool calls.                                                               |
+| `host`         | string | yes      | Hostname or IP address.                                                                                            |
+| `port`         | int    | no       | Overrides `[defaults].port`.                                                                                       |
+| `user`         | string | no       | Overrides `[defaults].user`.                                                                                       |
+| `tmux_session` | string | no       | Overrides `[defaults].tmux_session`.                                                                               |
+| `log_output`   | bool   | no       | Add a 1024-character excerpt of `exec` output to the audit log. Off by default because output can contain secrets. |
+| `key`          | string | no\*     | Path to private SSH key (supports `~` and `$VAR`).                                                                 |
+| `key_env`      | string | no\*     | Name of env var holding the private key PEM.                                                                       |
+| `agent`        | bool   | no\*     | `true` to use `SSH_AUTH_SOCK` (ssh-agent / 1Password / Bitwarden).                                                 |
+| `password_env` | string | no\*     | Name of env var holding the SSH password.                                                                          |
 
 \*Exactly one auth field is required per host. See [Auth Modes](#auth-modes).
 

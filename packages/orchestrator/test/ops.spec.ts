@@ -10,6 +10,7 @@ const recording = () => {
   const runner: FleetRunner = {
     hostNames: ["box-a", "box-b"],
     sessionFor: () => "agent",
+    logOutputFor: () => false,
     tmuxRunnerFor: (host) => Right((command: string) => run(host, command)),
     exec: (host, command) => run(host, command),
     status: () => [

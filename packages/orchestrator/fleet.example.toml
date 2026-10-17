@@ -7,6 +7,9 @@ tmux_session = "agent"
 max_per_host = 2
 idle_timeout_ms = 60000
 
+# [audit]
+# path = "~/.local/state/ssh-fleet/audit.jsonl"   # the default
+
 [[hosts]]
 name = "box-a"
 host = "10.0.0.11"
@@ -17,6 +20,7 @@ key = "~/.ssh/id_ed25519"
 name = "box-b"
 host = "build.example.com"
 agent = true
+log_output = true   # add an excerpt of exec output to the audit log
 
 [[hosts]]
 name = "box-c"

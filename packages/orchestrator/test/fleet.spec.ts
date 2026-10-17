@@ -37,6 +37,42 @@ ${base}`)
     }
   })
 
+  it("defaults the audit path", () => {
+    expect(
+      parseFleet(base)
+        .map((f) => f.audit.path)
+        .orElse(""),
+    ).toBe("~/.local/state/ssh-fleet/audit.jsonl")
+  })
+
+  it("reads [audit].path", () => {
+    const r = parseFleet(`[audit]\npath = "/var/log/fleet/audit.jsonl"\n${base}`)
+    expect(r.map((f) => f.audit.path).orElse("")).toBe("/var/log/fleet/audit.jsonl")
+  })
+
+  it("rejects an empty [audit].path", () => {
+    const r = parseFleet(`[audit]\npath = ""\n${base}`)
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain("audit.path must be a non-empty string")
+  })
+
+  it("reads log_output per host, default false", () => {
+    const r = parseFleet(`${base}log_output = true
+
+[[hosts]]
+name = "box-b"
+host = "10.0.0.12"
+key = "/keys/id_b"
+`)
+    expect(r.map((f) => f.hosts.map((h) => h.logOutput)).orElse([])).toEqual([true, false])
+  })
+
+  it("rejects a non-boolean log_output", () => {
+    const r = parseFleet(`${base}log_output = "yes"\n`)
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain('host "box-a": log_output must be true or false')
+  })
+
   it("reads pool settings with defaults", () => {
     const r = parseFleet(base)
     expect(r.isRight()).toBe(true)
