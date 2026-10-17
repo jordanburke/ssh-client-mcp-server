@@ -1,7 +1,7 @@
 # Design: fleet-orchestrator MCP — governance layer
 
 **Date:** 2026-10-17
-**Status:** Draft; pending review
+**Status:** Approved (design)
 **Author:** Jordan Burke (with Claude)
 
 ## Summary
@@ -339,7 +339,7 @@ different parties, can then be revoked independently.
 
 - **Transport:** serve with `transportType: "httpStream"` and FastMCP's
   `authenticate` hook.
-  - somamcp ≥ 1.4 exposes both; bump the `^1.0.12` pin.
+  - somamcp ≥ 1.4 exposes both; all packages already pin `^1.4.1`.
   - Bind to `127.0.0.1` by default; binding a tailnet address requires an
     explicit flag.
 - **Tokens:** agents authenticate with the bearer instance token they received
