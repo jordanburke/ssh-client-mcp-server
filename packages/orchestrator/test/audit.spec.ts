@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { Option } from "functype"
 import { UserError } from "somamcp"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 
-import { AGENT_UNKNOWN, type AuditCall, type AuditSink, createAuditor, excerpt } from "../src/audit.js"
+import { AGENT_UNKNOWN, type AuditCall, type AuditSink, createAuditor, excerpt, openAuditLog } from "../src/audit.js"
 
 const clock = () => {
   const times = [new Date("2026-10-17T14:02:11.000Z"), new Date("2026-10-17T14:02:11.412Z")]
@@ -141,5 +145,57 @@ describe("excerpt", () => {
   it("excerpt keeps whole code points", () => {
     expect(excerpt("x".repeat(2000))).toHaveLength(1024)
     expect(Array.from(excerpt("😀".repeat(2000)))).toHaveLength(1024)
+  })
+})
+
+describe("openAuditLog", () => {
+  const freshDir = () => mkdtempSync(join(tmpdir(), "audit-"))
+  const modeOf = (file: string) => statSync(file).mode & 0o777
+  const savedHome = process.env.HOME
+
+  afterEach(() => {
+    process.env.HOME = savedHome
+  })
+
+  it("creates missing directories and a 0600 file", () => {
+    const file = join(freshDir(), "a/b/audit.jsonl")
+    expect(openAuditLog(file).isRight()).toBe(true)
+    expect(modeOf(file)).toBe(0o600)
+  })
+
+  it("tightens an existing 0644 file to 0600", () => {
+    const file = join(freshDir(), "audit.jsonl")
+    writeFileSync(file, "", { mode: 0o644 })
+    expect(openAuditLog(file).isRight()).toBe(true)
+    expect(modeOf(file)).toBe(0o600)
+  })
+
+  it("appends lines after existing content", () => {
+    const file = join(freshDir(), "audit.jsonl")
+    writeFileSync(file, "old\n")
+    const sink = openAuditLog(file).orThrow()
+    sink("a")
+    sink("b")
+    expect(readFileSync(file, "utf8")).toBe("old\na\nb\n")
+  })
+
+  it("fails when the path is a directory", () => {
+    const dir = freshDir()
+    mkdirSync(join(dir, "sub"))
+    const result = openAuditLog(join(dir, "sub"))
+    expect(result.isLeft()).toBe(true)
+    expect(
+      result.fold(
+        (msg) => msg,
+        () => "",
+      ),
+    ).toContain(join(dir, "sub"))
+  })
+
+  it("expands ~", () => {
+    const dir = freshDir()
+    process.env.HOME = dir
+    expect(openAuditLog("~/x/audit.jsonl").isRight()).toBe(true)
+    expect(modeOf(join(dir, "x/audit.jsonl"))).toBe(0o600)
   })
 })

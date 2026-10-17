@@ -1,7 +1,12 @@
-import { type Option, Try, type Wire } from "functype"
+import { appendFileSync, chmodSync, mkdirSync } from "node:fs"
+import { dirname } from "node:path"
+
+import { type Either, Left, type Option, Right, Try, type Wire } from "functype"
+import { Path } from "functype-os"
 import { UserError } from "somamcp"
 
 export const AGENT_UNKNOWN = "unknown"
+export const DEFAULT_AUDIT_PATH = "~/.local/state/ssh-fleet/audit.jsonl"
 export const EXCERPT_CHARS = 1024
 
 // Tool-specific fields of an audit line, in the shape written to disk.
@@ -71,3 +76,19 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
 
   return { audited }
 }
+
+// Opens the audit log at `path`, creating it and its directories if needed, and forces mode 0600
+// so an existing file with wider permissions is tightened. Left when the file can't be written.
+export const openAuditLog = (path: string): Either<string, AuditSink> =>
+  Path.expand(path).fold(
+    (e) => Left<string, AuditSink>(`invalid audit path ${path}: ${messageOf(e)}`),
+    (file) =>
+      Try(() => {
+        mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+        appendFileSync(file, "", { mode: 0o600 })
+        chmodSync(file, 0o600)
+      }).fold(
+        (e) => Left<string, AuditSink>(`audit log ${file} is not writable: ${messageOf(e)}`),
+        () => Right<string, AuditSink>((line) => appendFileSync(file, `${line}\n`)),
+      ),
+  )
