@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -197,5 +197,32 @@ describe("openAuditLog", () => {
     process.env.HOME = dir
     expect(openAuditLog("~/x/audit.jsonl").isRight()).toBe(true)
     expect(modeOf(join(dir, "x/audit.jsonl"))).toBe(0o600)
+  })
+
+  it("recreates a deleted log at 0600", () => {
+    const file = join(freshDir(), "audit.jsonl")
+    const sink = openAuditLog(file).orThrow()
+    unlinkSync(file)
+    sink("a")
+    expect(modeOf(file)).toBe(0o600)
+    expect(readFileSync(file, "utf8")).toBe("a\n")
+  })
+
+  it("refuses a symlink at the audit path at startup", () => {
+    const dir = freshDir()
+    writeFileSync(join(dir, "target"), "")
+    symlinkSync(join(dir, "target"), join(dir, "audit.jsonl"))
+    expect(openAuditLog(join(dir, "audit.jsonl")).isLeft()).toBe(true)
+  })
+
+  it("refuses to follow a symlink swapped in after startup", () => {
+    const dir = freshDir()
+    const file = join(dir, "audit.jsonl")
+    const sink = openAuditLog(file).orThrow()
+    writeFileSync(join(dir, "target"), "")
+    unlinkSync(file)
+    symlinkSync(join(dir, "target"), file)
+    expect(() => sink("a")).toThrow()
+    expect(readFileSync(join(dir, "target"), "utf8")).toBe("")
   })
 })

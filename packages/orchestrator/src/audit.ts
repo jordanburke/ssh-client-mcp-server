@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, mkdirSync } from "node:fs"
+import { chmodSync, closeSync, constants, mkdirSync, openSync, writeSync } from "node:fs"
 import { dirname } from "node:path"
 
 import { type Either, Left, type Option, Right, Try, type Wire } from "functype"
@@ -77,6 +77,19 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
   return { audited }
 }
 
+// Every append reopens the file, so a deleted or rotated log is recreated at 0600; O_NOFOLLOW
+// refuses a symlink planted at the path instead of writing through it.
+const APPEND_NOFOLLOW = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW
+
+const appendText = (file: string, text: string): void => {
+  const fd = openSync(file, APPEND_NOFOLLOW, 0o600)
+  try {
+    writeSync(fd, text)
+  } finally {
+    closeSync(fd)
+  }
+}
+
 // Opens the audit log at `path`, creating it and its directories if needed, and forces mode 0600
 // so an existing file with wider permissions is tightened. Left when the file can't be written.
 export const openAuditLog = (path: string): Either<string, AuditSink> =>
@@ -85,10 +98,10 @@ export const openAuditLog = (path: string): Either<string, AuditSink> =>
     (file) =>
       Try(() => {
         mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-        appendFileSync(file, "", { mode: 0o600 })
+        appendText(file, "")
         chmodSync(file, 0o600)
       }).fold(
         (e) => Left<string, AuditSink>(`audit log ${file} is not writable: ${messageOf(e)}`),
-        () => Right<string, AuditSink>((line) => appendFileSync(file, `${line}\n`)),
+        () => Right<string, AuditSink>((line) => appendText(file, `${line}\n`)),
       ),
   )
