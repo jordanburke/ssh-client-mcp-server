@@ -1,10 +1,11 @@
 import { validateSession } from "@ssh-mcp/core"
-import { type Either, Left, List, Option, Right } from "functype"
+import { type Either, Left, List, Option, Right, type Wire } from "functype"
 import { Platform } from "functype-os"
 
 export { resolveAuth, type ResolveAuthOptions } from "@ssh-mcp/core"
 
-export type ArgvConfig = Readonly<Record<string, string>>
+// Raw CLI input: a flag that was not passed is undefined. Convert with Option(...) at use.
+export type ArgvConfig = Wire<Readonly<Record<string, string | undefined>>>
 
 export const parseArgv = (args: ReadonlyArray<string>): ArgvConfig =>
   List(args).fold<Record<string, string>>({}, (acc, arg) => {

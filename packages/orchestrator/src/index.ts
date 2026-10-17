@@ -18,6 +18,7 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
   version: `${number}.${number}.${number}`
 }
 
+/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
 const unwrap = <T>(result: Either<string, T>): T =>
   result.fold(
     (msg) => {
@@ -29,6 +30,7 @@ const unwrap = <T>(result: Either<string, T>): T =>
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 export const makeHandlers = (runner: FleetRunner) => ({
   hostsList: (): Promise<string> => Promise.resolve(JSON.stringify(runner.status())),
+  /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
   exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
     const r = await runner.exec(host, command)
     if (r.stderr) throw new UserError(`[${host}] Error (code ${r.code}):\n${r.stderr}`)

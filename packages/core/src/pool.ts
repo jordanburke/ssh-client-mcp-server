@@ -47,8 +47,13 @@ export const defaultConnect: ConnectFactory = (sshConfig) =>
               }
               const out: Buffer[] = []
               const errb: Buffer[] = []
-              stream.on("close", (code: number) =>
-                res({ stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(errb).toString(), code: code ?? 0 }),
+              // @types/ssh2 declares no args for "close"; at runtime ssh2 passes the exit code (null if signalled).
+              stream.on("close", (code: unknown) =>
+                res({
+                  stdout: Buffer.concat(out).toString(),
+                  stderr: Buffer.concat(errb).toString(),
+                  code: typeof code === "number" ? code : 0,
+                }),
               )
               stream.on("data", (d: Buffer) => out.push(d))
               stream.stderr.on("data", (d: Buffer) => errb.push(d))
@@ -106,34 +111,24 @@ export const createPool = (
     return st.connecting
   }
 
-  const acquireSlot = async (st: HostState): Promise<void> => {
+  const acquireSlot = (st: HostState): Promise<void> => {
     if (st.inFlight < opts.maxPerHost) {
       st.inFlight++
-      return
+      return Promise.resolve()
     }
-    const refs: { release: (() => void) | undefined; timer: ReturnType<typeof setTimeout> | undefined } = {
-      release: undefined,
-      timer: undefined,
-    }
-    try {
-      await new Promise<void>((resolve, reject) => {
-        refs.release = resolve
-        st.waiters.push(resolve)
-        refs.timer = setTimeout(
-          () => reject(new Error(`host "${st.name}" busy: no free connection slot after ${opts.acquireTimeoutMs}ms`)),
-          opts.acquireTimeoutMs,
-        )
-      })
-      // Woken by releaseSlot: the slot was transferred to us, so inFlight already counts it.
-    } catch (e) {
-      if (refs.release) {
-        const idx = st.waiters.indexOf(refs.release)
-        if (idx !== -1) st.waiters.splice(idx, 1)
+    // Woken by releaseSlot: the slot is transferred to the waiter, so inFlight already counts it.
+    return new Promise<void>((resolve, reject) => {
+      const wake = (): void => {
+        clearTimeout(timer)
+        resolve()
       }
-      throw e
-    } finally {
-      if (refs.timer) clearTimeout(refs.timer)
-    }
+      const timer = setTimeout(() => {
+        const idx = st.waiters.indexOf(wake)
+        if (idx !== -1) st.waiters.splice(idx, 1)
+        reject(new Error(`host "${st.name}" busy: no free connection slot after ${opts.acquireTimeoutMs}ms`))
+      }, opts.acquireTimeoutMs)
+      st.waiters.push(wake)
+    })
   }
 
   const releaseSlot = (st: HostState): void => {
@@ -160,14 +155,12 @@ export const createPool = (
     await acquireSlot(st)
     try {
       const conn = await ensureConn(st)
-      try {
-        return await conn.exec(command)
-      } catch {
+      return await conn.exec(command).catch(async () => {
         // connection likely dead — drop, reconnect once, retry
         dropConn(st)
         const fresh = await ensureConn(st)
-        return await fresh.exec(command)
-      }
+        return fresh.exec(command)
+      })
     } finally {
       releaseSlot(st)
     }

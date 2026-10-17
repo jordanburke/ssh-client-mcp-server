@@ -45,12 +45,13 @@ export const execSshResult = (sshConfig: ConnectConfig, command: string): Promis
         }
         const stdoutChunks: Buffer[] = []
         const stderrChunks: Buffer[] = []
-        stream.on("close", (code: number) => {
+        // @types/ssh2 declares no args for "close"; at runtime ssh2 passes the exit code (null if signalled).
+        stream.on("close", (code: unknown) => {
           conn.end()
           resolve({
             stdout: Buffer.concat(stdoutChunks).toString(),
             stderr: Buffer.concat(stderrChunks).toString(),
-            code: code ?? 0,
+            code: typeof code === "number" ? code : 0,
           })
         })
         stream.on("data", (data: Buffer) => stdoutChunks.push(data))

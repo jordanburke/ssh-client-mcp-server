@@ -67,6 +67,7 @@ async function main() {
 
   const defaultSession = Option(argv["tmux-session"]).orElse("agent")
   const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
+  /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
   const unwrap = <T>(result: Either<string, T>): T =>
     result.fold(
       (msg) => {
