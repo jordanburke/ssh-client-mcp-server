@@ -389,7 +389,7 @@ For calls that require approval (from `needs_approval` or `tmux = "approve"`):
   - a CA reference that fails to resolve or load into the agent
   - a missing `ssh`, `ssh-keygen`, or `ssh-agent` binary when any host uses
     `auth = "ca"`
-  - an unset agent token variable
+  - an instance store that is missing or unreadable
   - an audit path that isn't writable
 - **Per call:**
   - A denial returns, for example, `UserError("[box-a] denied by rule
