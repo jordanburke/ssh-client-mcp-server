@@ -76,7 +76,7 @@ is unattended by design.
 |-------|--------|-------------------|
 | Host enrollment | Once per host (one CA line) | None |
 | CA key in the hub | Once: install it into the hub user's protected store | None, including across reboots and restarts |
-| Agent tokens | Once per agent, in its MCP config | None; tokens don't expire, and are rotated by hand if leaked |
+| Instance enrollment | Once per machine/instance (see below) | None while in use; re-enroll only after long disuse or revocation |
 | Certificates | Never; minted and renewed automatically | None |
 | Approvals | Policy decides which commands need one | Only flagged commands, with sticky grants (below) |
 
@@ -93,6 +93,31 @@ from a store only the hub user can read:
 
 `ca_key_cmd` remains for these cases. Here, OS file and user separation is the
 protection, the same boundary that already guards the agent socket.
+
+**Instance enrollment: trust once, keep it while in use.** Credentials are
+issued to an *instance* (one agent on one machine or container), not to a
+session:
+
+1. **Enroll.** The hub prints a one-time enrollment code for the instance
+   (`ssh-fleet enroll claude@laptop`), valid for 10 minutes.
+2. **Exchange.** The instance swaps the code for a long-lived instance token
+   and stores it in its own config, readable only by its user.
+3. **Sliding expiry.** A token stays valid as long as it's used. It expires only
+   after `idle_expiry` with no use (default 30 days). Each use pushes the expiry
+   back, so an instance in daily use never re-enrolls. A machine left in a
+   drawer quietly ages out.
+4. **Hard maximum (optional).** `max_age` (for example 1 year) forces
+   re-enrollment even for active instances. It's off by default.
+5. **Revocation.** Revoking one instance (`ssh-fleet revoke claude@laptop`) is
+   central and immediate. It takes effect on that instance's next call, and
+   tears down its pooled connections.
+6. **Visibility.** `hosts_list` gains a sibling `instances_list` showing each
+   instance's last use and expiry.
+
+The hub stores only a hash of each token, along with its name, created time,
+last-use time and expiry. Short-lived SSH certificates (Phase 3) stay
+invisible underneath: the long-lived thing is the instance's trust, never an
+SSH credential.
 
 **Sticky approvals.** An approval can be granted once, or for a window:
 
@@ -317,8 +342,10 @@ different parties, can then be revoked independently.
   - somamcp ≥ 1.4 exposes both; bump the `^1.0.12` pin.
   - Bind to `127.0.0.1` by default; binding a tailnet address requires an
     explicit flag.
-- **Tokens:** agents authenticate with a bearer token, configured by reference:
-  `[[agents]] name = "claude"`, `token_env = "SSHFLEET_TOKEN_CLAUDE"`.
+- **Tokens:** agents authenticate with the bearer instance token they received
+  at enrollment (see *Seamless operation*). Policy refers to agents by name:
+  `claude` matches every enrolled `claude@*` instance, and `claude@laptop`
+  matches one instance.
   - Compare in constant time.
   - Reject unknown tokens before any tool runs.
 - **Where the identity is used:** the authenticated agent name flows into the
