@@ -2,6 +2,8 @@ import { type ResolveAuthOptions, validateSession } from "@ssh-mcp/core"
 import { type Either, Left, List, Option, Right, Try } from "functype"
 import { parse as parseToml } from "smol-toml"
 
+import { DEFAULT_AUDIT_PATH } from "./audit.js"
+
 export type HostEntry = Readonly<{
   name: string
   host: string
@@ -9,11 +11,14 @@ export type HostEntry = Readonly<{
   user: Option<string>
   auth: ResolveAuthOptions
   tmuxSession: string
+  logOutput: boolean
 }>
 
 export type PoolSettings = Readonly<{ maxPerHost: number; idleTimeoutMs: number; acquireTimeoutMs: number }>
 
-export type Fleet = Readonly<{ hosts: HostEntry[]; pool: PoolSettings }>
+export type AuditSettings = Readonly<{ path: string }>
+
+export type Fleet = Readonly<{ hosts: HostEntry[]; pool: PoolSettings; audit: AuditSettings }>
 
 type RawHost = Record<string, unknown>
 
@@ -58,6 +63,15 @@ const parsePool = (raw: Record<string, unknown>): PoolSettings => {
   }
 }
 
+const parseAudit = (raw: Record<string, unknown>): Either<string, AuditSettings> => {
+  const a = (raw.audit ?? {}) as Record<string, unknown>
+  if (a.path === undefined) return Right<string, AuditSettings>({ path: DEFAULT_AUDIT_PATH })
+  return str(a.path).fold(
+    () => Left<string, AuditSettings>("audit.path must be a non-empty string"),
+    (path) => Right<string, AuditSettings>({ path }),
+  )
+}
+
 export const parseFleet = (toml: string): Either<string, Fleet> => {
   const parsed = Try(() => parseToml(toml) as Record<string, unknown>)
   if (parsed.isFailure()) return Left<string, Fleet>(`Invalid TOML: ${(parsed.error as Error).message}`)
@@ -79,6 +93,8 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
     if (names.indexOf(name) < index) return Left<string, HostEntry>(`duplicate host name "${name}"`)
     const address = str(h.host)
     if (address.isNone()) return Left<string, HostEntry>(`host "${name}": missing host address`)
+    if (h.log_output !== undefined && typeof h.log_output !== "boolean")
+      return Left<string, HostEntry>(`host "${name}": log_output must be true or false`)
     return resolveHostAuth(name, h).map((auth) => ({
       name,
       host: address.orElse(""),
@@ -86,11 +102,13 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
       user: str(h.user).or(defaultUser),
       auth,
       tmuxSession: str(h.tmux_session).orElse(defaultSession),
+      logOutput: h.log_output === true,
     }))
   }
 
+  const audit = parseAudit(raw)
   const results = rawHosts.map(parseHost)
-  const errors = results.flatMap((r) =>
+  const errors = [audit, ...results].flatMap((r) =>
     r.fold<string[]>(
       (msg) => [msg],
       () => [],
@@ -105,5 +123,5 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
 
   return errors.length > 0
     ? Left<string, Fleet>(`Fleet config errors:\n${List(errors).toArray().join("\n")}`)
-    : Right<string, Fleet>({ hosts, pool: parsePool(raw) })
+    : Right<string, Fleet>({ hosts, pool: parsePool(raw), audit: audit.orElse({ path: DEFAULT_AUDIT_PATH }) })
 }

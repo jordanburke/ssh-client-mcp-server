@@ -16,6 +16,7 @@ export type FleetRunner = Readonly<{
   tmuxRunnerFor: (host: string) => Either<string, TmuxRunner>
   exec: (host: string, command: string) => Promise<CommandResult>
   sessionFor: (host: string) => string
+  logOutputFor: (host: string) => boolean
   status: () => HostStatus[]
   shutdown: () => Promise<void>
 }>
@@ -50,12 +51,14 @@ const makeRunner = (
   connect?: ConnectFactory,
 ): FleetRunner => {
   const sessions = Map.of(...fleet.hosts.map((h): [string, string] => [h.name, h.tmuxSession]))
+  const logOutput = Map.of(...fleet.hosts.map((h): [string, boolean] => [h.name, h.logOutput]))
   const pool = createPool(resolved, fleet.pool, connect)
   const names = Set.of(...resolved.map((r) => r.name))
 
   return {
     hostNames: [...names],
     sessionFor: (host) => sessions.get(host).orElse("agent"),
+    logOutputFor: (host) => logOutput.get(host).orElse(false),
     tmuxRunnerFor: (host) =>
       names.has(host)
         ? Right<string, TmuxRunner>((command) => pool.run(host, command))

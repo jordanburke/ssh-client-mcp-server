@@ -1,16 +1,26 @@
 #!/usr/bin/env node
 
+import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "@ssh-mcp/core"
-import { type Either, Try } from "functype"
+import { type CommandResult, tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "@ssh-mcp/core"
+import { type Either, Option, Try } from "functype"
 import { createServer, UserError } from "somamcp"
 import { z } from "zod"
 
+import {
+  AGENT_UNKNOWN,
+  type AuditCall,
+  type AuditFields,
+  type Auditor,
+  createAuditor,
+  excerpt,
+  openAuditLog,
+} from "./audit.js"
 import { parseFleet } from "./fleet.js"
 import { buildFleetRunner, type FleetRunner } from "./runners.js"
 
@@ -27,45 +37,96 @@ const unwrap = <T>(result: Either<string, T>): T =>
     (value) => value,
   )
 
+const bytes = (s: string): number => Buffer.byteLength(s, "utf8")
+const noSummary = (): AuditFields => ({})
+
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
-export const makeHandlers = (runner: FleetRunner) => ({
-  hostsList: (): Promise<string> => Promise.resolve(JSON.stringify(runner.status())),
-  /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
-  exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
-    const r = await runner.exec(host, command)
-    if (r.stderr) throw new UserError(`[${host}] Error (code ${r.code}):\n${r.stderr}`)
-    return r.stdout
-  },
-  tmuxList: async ({ host }: { host: string }): Promise<string> =>
-    JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host))))),
-  tmuxSend: async ({
+// Every call goes through the auditor: a decision line before it runs, a result line after.
+export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
+  const call = (tool: string, host: Option<string>, fields: AuditFields = {}): AuditCall => ({
+    agent: AGENT_UNKNOWN,
+    tool,
     host,
-    session,
-    input,
-    submit,
-  }: {
-    host: string
-    session?: string
-    input: string
-    submit?: boolean
-  }): Promise<string> => {
-    const target = session ?? runner.sessionFor(host)
-    unwrap(await tmuxSend(unwrap(runner.tmuxRunnerFor(host)), { session: target, input, submit: submit ?? true }))
-    return `[${host}] sent to tmux session "${target}".`
-  },
-  tmuxRead: async ({ host, session, lines }: { host: string; session?: string; lines?: number }): Promise<string> =>
-    unwrap(
-      await tmuxRead(unwrap(runner.tmuxRunnerFor(host)), {
-        session: session ?? runner.sessionFor(host),
-        lines: lines ?? 200,
-      }),
-    ),
-  tmuxKeys: async ({ host, session, keys }: { host: string; session?: string; keys: string[] }): Promise<string> => {
-    const target = session ?? runner.sessionFor(host)
-    unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host)), { session: target, keys }))
-    return `[${host}] sent keys [${keys.join(", ")}] to tmux session "${target}".`
-  },
-})
+    fields,
+  })
+
+  // Sizes only, unless the host opts in to an output excerpt with log_output.
+  const summarizeExec =
+    (host: string) =>
+    (r: CommandResult): AuditFields => ({
+      code: r.code,
+      stdout_bytes: bytes(r.stdout),
+      stderr_bytes: bytes(r.stderr),
+      ...(runner.logOutputFor(host) ? { stdout_excerpt: excerpt(r.stdout), stderr_excerpt: excerpt(r.stderr) } : {}),
+    })
+
+  return {
+    hostsList: (): Promise<string> =>
+      auditor.audited(
+        call("hosts_list", Option.none<string>()),
+        () => Promise.resolve(JSON.stringify(runner.status())),
+        noSummary,
+      ),
+    /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+    exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
+      const r = await auditor.audited(
+        call("exec", Option(host), { command }),
+        () => runner.exec(host, command),
+        summarizeExec(host),
+      )
+      if (r.stderr) throw new UserError(`[${host}] Error (code ${r.code}):\n${r.stderr}`)
+      return r.stdout
+    },
+    tmuxList: ({ host }: { host: string }): Promise<string> =>
+      auditor.audited(
+        call("tmux_list", Option(host)),
+        async () => JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host))))),
+        noSummary,
+      ),
+    tmuxSend: ({
+      host,
+      session,
+      input,
+      submit,
+    }: {
+      host: string
+      session?: string
+      input: string
+      submit?: boolean
+    }): Promise<string> => {
+      const target = session ?? runner.sessionFor(host)
+      const press = submit ?? true
+      return auditor.audited(
+        call("tmux_send", Option(host), { session: target, input, submit: press }),
+        async () => {
+          unwrap(await tmuxSend(unwrap(runner.tmuxRunnerFor(host)), { session: target, input, submit: press }))
+          return `[${host}] sent to tmux session "${target}".`
+        },
+        noSummary,
+      )
+    },
+    tmuxRead: ({ host, session, lines }: { host: string; session?: string; lines?: number }): Promise<string> => {
+      const target = session ?? runner.sessionFor(host)
+      const count = lines ?? 200
+      return auditor.audited(
+        call("tmux_read", Option(host), { session: target, lines: count }),
+        async () => unwrap(await tmuxRead(unwrap(runner.tmuxRunnerFor(host)), { session: target, lines: count })),
+        (transcript) => ({ stdout_bytes: bytes(transcript) }),
+      )
+    },
+    tmuxKeys: ({ host, session, keys }: { host: string; session?: string; keys: string[] }): Promise<string> => {
+      const target = session ?? runner.sessionFor(host)
+      return auditor.audited(
+        call("tmux_keys", Option(host), { session: target, keys }),
+        async () => {
+          unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host)), { session: target, keys }))
+          return `[${host}] sent keys [${keys.join(", ")}] to tmux session "${target}".`
+        },
+        noSummary,
+      )
+    },
+  }
+}
 
 const findConfigPath = (argv: ReadonlyArray<string>): string => {
   const flag = argv.find((a) => a.startsWith("--config="))
@@ -91,6 +152,15 @@ async function main(): Promise<void> {
     (f) => f,
   )
 
+  // Fail fast: no call may run unaudited, so an unwritable audit log stops startup.
+  const sink = openAuditLog(fleet.audit.path).fold(
+    (msg) => {
+      console.error(msg)
+      process.exit(1)
+    },
+    (s) => s,
+  )
+
   const runner = (await buildFleetRunner(fleet)).fold(
     (msg) => {
       console.error(msg)
@@ -99,7 +169,7 @@ async function main(): Promise<void> {
     (r) => r,
   )
 
-  const h = makeHandlers(runner)
+  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID }))
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,
@@ -159,7 +229,9 @@ async function main(): Promise<void> {
   })
 
   await server.start({ transportType: "stdio" })
-  console.error(`SSH Fleet MCP Server running on stdio (${runner.hostNames.length} hosts)`)
+  console.error(
+    `SSH Fleet MCP Server running on stdio (${runner.hostNames.length} hosts); audit log: ${fleet.audit.path}`,
+  )
 
   const shutdown = async () => {
     await runner.shutdown()

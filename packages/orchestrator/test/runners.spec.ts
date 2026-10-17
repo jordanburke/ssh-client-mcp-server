@@ -51,6 +51,28 @@ describe("buildFleetRunner", () => {
     }
   })
 
+  it("logOutputFor reflects the host entry", async () => {
+    const f = parseFleet(`
+[[hosts]]
+name = "box-a"
+host = "10.0.0.11"
+agent = true
+log_output = true
+
+[[hosts]]
+name = "box-b"
+host = "10.0.0.12"
+agent = true
+`)
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.logOutputFor("box-a")).toBe(true)
+    expect(r.value.logOutputFor("box-b")).toBe(false)
+    expect(r.value.logOutputFor("nope")).toBe(false)
+    await r.value.shutdown()
+  })
+
   it("errors the tmux runner for an unknown host", async () => {
     if (fleet.isLeft()) throw new Error(fleet.value)
     const r = await buildFleetRunner(fleet.value, connect)

@@ -15,6 +15,7 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) and the shared `@ssh
 - [Auth Modes](#auth-modes)
 - [Secrets-by-Reference Rule](#secrets-by-reference-rule)
 - [Tools](#tools)
+- [Audit Log](#audit-log)
 - [Client Setup](#client-setup)
 - [Development](#development)
 
@@ -36,7 +37,7 @@ If the config file cannot be read, or if it contains validation errors, the serv
 
 ## Fleet Config Schema
 
-The fleet config is a [TOML](https://toml.io) file with three top-level sections.
+The fleet config is a [TOML](https://toml.io) file with four top-level sections.
 
 ### `[defaults]` (optional)
 
@@ -58,21 +59,30 @@ Controls the shared per-host connection pool.
 | `idle_timeout_ms`    | int  | `60000` | Idle connection eviction interval (ms).                           |
 | `acquire_timeout_ms` | int  | `30000` | How long to wait for a pool slot before failing a tool call (ms). |
 
+### `[audit]` (optional)
+
+Where the audit log is written. See [Audit Log](#audit-log).
+
+| Key    | Type   | Default                                | Description                                                         |
+| ------ | ------ | -------------------------------------- | ------------------------------------------------------------------- |
+| `path` | string | `~/.local/state/ssh-fleet/audit.jsonl` | Audit log file (supports `~` and `$VAR`). Created with mode `0600`. |
+
 ### `[[hosts]]` (required, one or more)
 
 Each `[[hosts]]` entry defines a remote machine. Host names must be unique and may contain only letters, digits, hyphens, and underscores.
 
-| Key            | Type   | Required | Description                                                        |
-| -------------- | ------ | -------- | ------------------------------------------------------------------ |
-| `name`         | string | yes      | Logical name used as the `host` param in tool calls.               |
-| `host`         | string | yes      | Hostname or IP address.                                            |
-| `port`         | int    | no       | Overrides `[defaults].port`.                                       |
-| `user`         | string | no       | Overrides `[defaults].user`.                                       |
-| `tmux_session` | string | no       | Overrides `[defaults].tmux_session`.                               |
-| `key`          | string | no\*     | Path to private SSH key (supports `~` and `$VAR`).                 |
-| `key_env`      | string | no\*     | Name of env var holding the private key PEM.                       |
-| `agent`        | bool   | no\*     | `true` to use `SSH_AUTH_SOCK` (ssh-agent / 1Password / Bitwarden). |
-| `password_env` | string | no\*     | Name of env var holding the SSH password.                          |
+| Key            | Type   | Required | Description                                                                                                        |
+| -------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `name`         | string | yes      | Logical name used as the `host` param in tool calls.                                                               |
+| `host`         | string | yes      | Hostname or IP address.                                                                                            |
+| `port`         | int    | no       | Overrides `[defaults].port`.                                                                                       |
+| `user`         | string | no       | Overrides `[defaults].user`.                                                                                       |
+| `tmux_session` | string | no       | Overrides `[defaults].tmux_session`.                                                                               |
+| `log_output`   | bool   | no       | Add a 1024-character excerpt of `exec` output to the audit log. Off by default because output can contain secrets. |
+| `key`          | string | no\*     | Path to private SSH key (supports `~` and `$VAR`).                                                                 |
+| `key_env`      | string | no\*     | Name of env var holding the private key PEM.                                                                       |
+| `agent`        | bool   | no\*     | `true` to use `SSH_AUTH_SOCK` (ssh-agent / 1Password / Bitwarden).                                                 |
+| `password_env` | string | no\*     | Name of env var holding the SSH password.                                                                          |
 
 \*Exactly one auth field is required per host. See [Auth Modes](#auth-modes).
 
@@ -162,6 +172,33 @@ Send control/special keys (e.g. `C-c`) to a tmux session on a fleet host.
 | `host`    | string   | yes      | Configured host name.                                      |
 | `session` | string   | no       | tmux session name (defaults to the host's `tmux_session`). |
 | `keys`    | string[] | yes      | tmux key names, e.g. `["C-c"]`.                            |
+
+## Audit Log
+
+Every tool call writes two JSON lines to the audit log (see [`[audit]`](#audit-optional)): a `decision` line **before** the call runs and a `result` line after it, sharing `id`. A call that hangs or crashes the server is still on record.
+
+```json
+{"ts":"2026-10-17T14:02:11.000Z","id":"5f0c…","event":"decision","agent":"unknown","tool":"exec","host":"box-a","command":"systemctl status cups","decision":"allow"}
+{"ts":"2026-10-17T14:02:11.412Z","id":"5f0c…","event":"result","agent":"unknown","tool":"exec","host":"box-a","status":"ok","ms":412,"code":0,"stdout_bytes":1830,"stderr_bytes":0}
+```
+
+What each tool records:
+
+| Tool         | Decision line                | Result line                                                                           |
+| ------------ | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `hosts_list` | (no `host`)                  | —                                                                                     |
+| `exec`       | `command`                    | `code`, `stdout_bytes`, `stderr_bytes`; plus excerpts when the host sets `log_output` |
+| `tmux_list`  | —                            | —                                                                                     |
+| `tmux_send`  | `session`, `input`, `submit` | —                                                                                     |
+| `tmux_read`  | `session`, `lines`           | `stdout_bytes` (never the transcript)                                                 |
+| `tmux_keys`  | `session`, `keys`            | —                                                                                     |
+
+- **Sizes, not contents.** Output can contain secrets, so only byte counts are logged. A host with `log_output = true` also gets `stdout_excerpt` / `stderr_excerpt` (first 1024 characters) on `exec`.
+- **`status`** is `"ok"` when the call completed (an `exec` with a non-zero exit is still `"ok"`, with its `code`) and `"error"` with an `error` message when it didn't, for example an unknown host.
+- **`agent`** is `"unknown"` until per-agent identity lands; `decision` is always `"allow"` until per-host policy lands.
+- **No unaudited calls.** The server refuses to start if the log can't be written, and a call whose audit line can't be written fails.
+- **The file is reopened for every line,** so a deleted or rotated log is recreated at mode `0600`. A symlink at the audit path is refused rather than followed.
+- **Append-only is best effort** — the server's user can truncate its own file. For stronger integrity, set the OS append-only flag from an administrator account: `sudo chattr +a <file>` (Linux) or `sudo chflags uappend <file>` (macOS). Rotation is out of scope.
 
 ## Example Config
 
