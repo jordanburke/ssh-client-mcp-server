@@ -117,6 +117,23 @@ describe("audit", () => {
     expect(parsed()[0]).toMatchObject({ tool: "tmux_send", session: "agent", input: "ls -la", submit: true })
   })
 
+  it("tmux_keys logs the session and keys", async () => {
+    const { runner } = recording({ stdout: "", stderr: "", code: 0 })
+    const { h, parsed } = withAudit(runner)
+    await h.tmuxKeys({ host: "box-a", keys: ["C-c"] })
+    expect(parsed()[0]).toMatchObject({ tool: "tmux_keys", host: "box-a", session: "agent", keys: ["C-c"] })
+  })
+
+  it("hosts_list is audited without a host", async () => {
+    const { runner } = recording()
+    const { h, parsed } = withAudit(runner)
+    await h.hostsList()
+    const [decision, result] = parsed()
+    expect(decision).toMatchObject({ event: "decision", tool: "hosts_list" })
+    expect("host" in decision).toBe(false)
+    expect(result).toMatchObject({ event: "result", status: "ok" })
+  })
+
   it("tmux_read logs the line count, not the transcript", async () => {
     const { runner } = recording({ stdout: "SECRET-OUTPUT\n", stderr: "", code: 0 })
     const { h, lines, parsed } = withAudit(runner)

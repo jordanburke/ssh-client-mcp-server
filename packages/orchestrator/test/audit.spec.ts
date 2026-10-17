@@ -117,6 +117,17 @@ describe("createAuditor", () => {
     await expect(result).rejects.toThrow("after execution")
   })
 
+  it("the audit error wins when both the call and the result write fail", async () => {
+    const { sink } = memory([2])
+    const result = auditorWith(sink).audited(
+      execCall,
+      () => Promise.reject(new Error("boom")),
+      () => ({}),
+    )
+    await expect(result).rejects.toBeInstanceOf(UserError)
+    await expect(result).rejects.toThrow("after execution")
+  })
+
   it("a command with a newline stays one line", async () => {
     const { lines, sink } = memory()
     const command = 'echo "a"\nrm x'
@@ -215,6 +226,18 @@ describe("openAuditLog", () => {
     expect(openAuditLog(join(dir, "audit.jsonl")).isLeft()).toBe(true)
   })
 
+  it("refuses a dangling symlink at the audit path at startup", () => {
+    const dir = freshDir()
+    symlinkSync(join(dir, "missing"), join(dir, "audit.jsonl"))
+    const result = openAuditLog(join(dir, "audit.jsonl"))
+    expect(
+      result.fold(
+        (msg) => msg,
+        () => "",
+      ),
+    ).toContain("ELOOP")
+  })
+
   it("refuses to follow a symlink swapped in after startup", () => {
     const dir = freshDir()
     const file = join(dir, "audit.jsonl")
@@ -222,7 +245,7 @@ describe("openAuditLog", () => {
     writeFileSync(join(dir, "target"), "")
     unlinkSync(file)
     symlinkSync(join(dir, "target"), file)
-    expect(() => sink("a")).toThrow()
+    expect(() => sink("a")).toThrow(/ELOOP/)
     expect(readFileSync(join(dir, "target"), "utf8")).toBe("")
   })
 })

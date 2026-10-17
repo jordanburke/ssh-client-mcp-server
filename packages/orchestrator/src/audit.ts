@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, constants, mkdirSync, openSync, writeSync } from "node:fs"
+import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync, writeSync } from "node:fs"
 import { dirname } from "node:path"
 
 import { type Either, Left, type Option, Right, Try, type Wire } from "functype"
@@ -81,27 +81,41 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
 // refuses a symlink planted at the path instead of writing through it.
 const APPEND_NOFOLLOW = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW
 
-const appendText = (file: string, text: string): void => {
+const withAppendFd = (file: string, use: (fd: number) => void): void => {
   const fd = openSync(file, APPEND_NOFOLLOW, 0o600)
   try {
-    writeSync(fd, text)
+    use(fd)
   } finally {
     closeSync(fd)
   }
 }
 
-// Opens the audit log at `path`, creating it and its directories if needed, and forces mode 0600
-// so an existing file with wider permissions is tightened. Left when the file can't be written.
+/** @interop the AuditSink contract signals failure by throwing; createAuditor turns it into a UserError. */
+const appendLine = (file: string, line: string): void =>
+  withAppendFd(file, (fd) => {
+    const text = `${line}\n`
+    const expected = Buffer.byteLength(text)
+    const written = writeSync(fd, text)
+    if (written !== expected) throw new Error(`short write: ${written} of ${expected} bytes`)
+  })
+
+// The mode is fixed through the open fd, so there is no path lookup to race, and only when it isn't
+// 0600 already: a file with the append-only flag (chattr +a, chflags uappend) refuses chmod.
+const ensurePrivate = (fd: number): void => {
+  if ((fstatSync(fd).mode & 0o777) !== 0o600) fchmodSync(fd, 0o600)
+}
+
+// Opens the audit log at `path`, creating it and its directories if needed, and tightens an
+// existing file with wider permissions to 0600. Left when the file can't be opened for append.
 export const openAuditLog = (path: string): Either<string, AuditSink> =>
   Path.expand(path).fold(
     (e) => Left<string, AuditSink>(`invalid audit path ${path}: ${messageOf(e)}`),
     (file) =>
       Try(() => {
         mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-        appendText(file, "")
-        chmodSync(file, 0o600)
+        withAppendFd(file, ensurePrivate)
       }).fold(
         (e) => Left<string, AuditSink>(`audit log ${file} is not writable: ${messageOf(e)}`),
-        () => Right<string, AuditSink>((line) => appendText(file, `${line}\n`)),
+        () => Right<string, AuditSink>((line) => appendLine(file, line)),
       ),
   )
