@@ -66,6 +66,47 @@ here. Therefore:
 Running the server over stdio as the same user remains supported for
 convenience. It is explicitly *not* governed, and the docs must say so.
 
+## Seamless operation
+
+**Goal:** after one-time setup, governance asks the human for nothing on a
+normal day. Security that prompts daily gets disabled, so each credential below
+is unattended by design.
+
+| Thing | Set up | Recurring prompts |
+|-------|--------|-------------------|
+| Host enrollment | Once per host (one CA line) | None |
+| CA key in the hub | Once: install it into the hub user's protected store | None, including across reboots and restarts |
+| Agent tokens | Once per agent, in its MCP config | None; tokens don't expire, and are rotated by hand if leaked |
+| Certificates | Never; minted and renewed automatically | None |
+| Approvals | Policy decides which commands need one | Only flagged commands, with sticky grants (below) |
+
+**CA key at boot.** The hub must restart unattended, so it can't depend on an
+interactive vault unlock. The canonical copy lives in the user's password
+manager (for backup and recovery). The hub reads its working copy at startup
+from a store only the hub user can read:
+
+- **macOS:** the hub user's keychain or the System keychain, read by the launchd
+  daemon.
+- **Linux:** a `0600` file owned by the hub user.
+- **Alternative:** a non-interactive secrets service using a machine token, such
+  as Bitwarden Secrets Manager or Infisical.
+
+`ca_key_cmd` remains for these cases. Here, OS file and user separation is the
+protection, the same boundary that already guards the agent socket.
+
+**Sticky approvals.** An approval can be granted once, or for a window:
+
+- **Approve 1h** grants the window for this agent, host and rule.
+- **Approve today** lasts until local midnight.
+
+The ntfy notification offers all three. Grants live in memory, are audited, and
+are dropped on restart. This keeps a working session from producing a stream of
+taps. Policy should be tuned so routine commands never need approval at all.
+
+**The human's own SSH** is outside the hub. A password-manager SSH agent with
+biometric unlock and an "until screen lock" timeout gives one Touch ID per
+session, not per connection.
+
 ## Architecture
 
 ```
@@ -217,8 +258,9 @@ Per-request detail stays in the hub's audit log.
 
 **CA custody (`core/ca.ts`)**
 - **Loading:** at startup the hub loads the CA private key from a reference,
-  either `ca_key_cmd` (a command that prints the key, such as a
-  password-manager CLI) or `ca_key_env`.
+  either `ca_key_cmd` (a command that prints the key), `ca_key_env`, or a file
+  or keychain item only the hub user can read. Loading must never need an
+  interactive unlock (see *Seamless operation*).
   - Inline keys are rejected, consistent with the existing secrets rule.
   - The key is added to a **private `ssh-agent`** whose socket lives in the hub's
     runtime directory, then dropped from process memory.
