@@ -76,6 +76,11 @@ describe("parsePolicyTable / resolvePolicy", () => {
     expect(errs.some((e) => e.startsWith('host "a": policy: invalid regex in allow: "("'))).toBe(true)
   })
 
+  it("a pattern that only compiles when wrapped is rejected", () => {
+    const errs = errorsOf(resolve({}, { mode: "readonly", allow: ["uptime)|(.*"] }))
+    expect(errs.some((e) => e.startsWith('host "a": policy: invalid regex in allow: "uptime)|(.*"'))).toBe(true)
+  })
+
   it("rejects allow without readonly", () => {
     expect(errorsOf(resolve({}, { allow: ["uptime"] }))).toContain(
       'host "a": policy: allow applies only to mode = "readonly"',
@@ -234,6 +239,26 @@ const rows: ReadonlyArray<[string, unknown, PolicyRequest, "allow" | "deny", str
   ],
   ["tmux open allows tmux_send", {}, tool("tmux_send"), "allow", "readwrite", ""],
 ]
+
+const LONG = "a".repeat(4097)
+const TOO_LONG = "command is longer than 4096 characters"
+
+describe("evaluate: command length", () => {
+  it("an over-long command is denied on a readonly host before any regex runs", () => {
+    // (\w+ ?)+ backtracks catastrophically; the cap must stop it before it runs.
+    const v = evaluate(resolved({}, { mode: "readonly", allow: ["(\\w+ ?)+"] }), exec(`${LONG}!`))
+    expect(v).toMatchObject({ decision: "deny", rule: "readonly", reason: TOO_LONG })
+  })
+
+  it("an over-long command is denied when needs_approval patterns would run", () => {
+    const v = evaluate(resolved({}, { needs_approval: ["(\\w+ ?)+x"] }), exec(LONG))
+    expect(v).toMatchObject({ decision: "deny", rule: "needs_approval", reason: TOO_LONG })
+  })
+
+  it("a long command is allowed on a readwrite host with no needs_approval", () => {
+    expect(evaluate(resolved({}, {}), exec(LONG)).decision).toBe("allow")
+  })
+})
 
 describe("evaluate", () => {
   it.each(rows)("%s", (_name, host, req, decision, rule, reason) => {

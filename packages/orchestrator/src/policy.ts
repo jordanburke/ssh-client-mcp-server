@@ -95,7 +95,9 @@ const compile = (
   wrap: (p: string) => string,
 ): Either<ReadonlyArray<string>, ReadonlyArray<RegExp>> => {
   const results = patterns.map((p) =>
-    Try(() => new RegExp(wrap(p))).fold(
+    // Compile the bare pattern first: one with an unmatched `)` (e.g. `uptime)|(.*`) only compiles once
+    // wrapped, and then escapes the wrap — `^(?:uptime)|(.*)$` matches anything.
+    Try(() => new RegExp(wrap(new RegExp(p).source))).fold(
       (e) => Left<string, RegExp>(`${where}: invalid regex in ${key}: "${p}" (${(e as Error).message})`),
       (re) => Right<string, RegExp>(re),
     ),
@@ -174,6 +176,11 @@ const denyBy = (rule: string, reason: string): Verdict => ({ decision: "deny", r
 // operators, substitution, redirection, grouping, escapes, quotes, globs and `~`.
 const READONLY_REJECT = /[\n\r\0;&|$`()<>{}\\'"*?[~]/
 
+// Policy regexes run synchronously and can backtrack badly, so commands that will be matched against
+// them are capped; a frozen regex would stall every host, not just this one.
+export const MAX_COMMAND_CHARS = 4096
+const TOO_LONG = `command is longer than ${MAX_COMMAND_CHARS} characters`
+
 const listed = (agents: ReadonlyArray<string>, agent: string): boolean =>
   agents.some((e) => agent === e || agent.startsWith(`${e}@`))
 
@@ -185,12 +192,15 @@ const evaluateTmuxInput = (policy: HostPolicy): Verdict => {
 }
 
 const evaluateExec = (policy: HostPolicy, command: string): Verdict => {
+  const tooLong = command.length > MAX_COMMAND_CHARS
   if (policy.mode === "readonly") {
+    if (tooLong) return denyBy("readonly", TOO_LONG)
     if (READONLY_REJECT.test(command)) return denyBy("readonly", "command contains a newline or shell metacharacter")
     return policy.allow.some((re) => re.test(command))
       ? allowBy("readonly")
       : denyBy("readonly", "command not in allow list")
   }
+  if (tooLong && policy.needsApproval.length > 0) return denyBy("needs_approval", TOO_LONG)
   const tripped = policy.needsApproval.find((re) => re.test(command))
   return tripped === undefined
     ? allowBy("readwrite")

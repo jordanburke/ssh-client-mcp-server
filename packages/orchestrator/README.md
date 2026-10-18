@@ -204,6 +204,7 @@ A denied call returns `[<host>] denied by rule <rule>: <reason>` to the agent an
 **Read before relying on it:**
 
 - **`readonly` is an allowlist, on purpose.** There is no deny-list mode: deny-lists over shell text are trivially bypassed (`r''m`, `$(…)`, `sh -c`). Spell out the characters a pattern allows, as in `systemctl status [\w@.-]+`. **Never use `.`, `.*` or `\S` in an `allow` pattern.**
+- **Avoid nested quantifiers** such as `(\w+ ?)+` in `allow` and `needs_approval`. Patterns run synchronously, and one that backtracks badly can stall the whole server, not just one host. As a backstop, a command longer than 4096 characters is denied whenever policy patterns would be matched against it (any `readonly` host, or a `readwrite` host with `needs_approval`).
 - **`needs_approval` is a tripwire, not a boundary.** It catches honest mistakes; an agent trying to get around it can.
 - **Approval isn't available yet,** so anything that requires approval is **denied**. `tmux = "approve"` is the recommended setting once approval ships; the built-in default is `"open"`.
 - **Agent identity isn't available yet** — every agent is `"unknown"` — so a host with `agents` set denies every call. The server prints a warning naming each such host at startup.
