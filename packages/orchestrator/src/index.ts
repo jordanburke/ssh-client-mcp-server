@@ -21,8 +21,8 @@ import {
   excerpt,
   openAuditLog,
 } from "./audit.js"
-import { parseFleet } from "./fleet.js"
-import { ALLOW } from "./policy.js"
+import { fleetWarnings, parseFleet } from "./fleet.js"
+import { ALLOW, evaluate, type PolicyRequest, type Verdict } from "./policy.js"
 import { buildFleetRunner, type FleetRunner } from "./runners.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
@@ -42,15 +42,28 @@ const bytes = (s: string): number => Buffer.byteLength(s, "utf8")
 const noSummary = (): AuditFields => ({})
 
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
-// Every call goes through the auditor: a decision line before it runs, a result line after.
+// Every call is checked against its host's policy and goes through the auditor: a decision line
+// before it runs, a result line after. A denied call writes its decision line and never runs.
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
-  const call = (tool: string, host: Option<string>, fields: AuditFields = {}): AuditCall => ({
+  const call = (tool: string, host: Option<string>, verdict: Verdict, fields: AuditFields = {}): AuditCall => ({
     agent: AGENT_UNKNOWN,
     tool,
     host,
     fields,
-    verdict: ALLOW,
+    verdict,
   })
+
+  // A host with no policy (an unknown host) gets ALLOW, so it reaches the runner and fails there.
+  const gated = (host: string, req: PolicyRequest, fields: AuditFields = {}): AuditCall =>
+    call(
+      req.tool,
+      Option(host),
+      runner.policyFor(host).fold(
+        () => ALLOW,
+        (policy) => evaluate(policy, req),
+      ),
+      fields,
+    )
 
   // Sizes only, unless the host opts in to an output excerpt with log_output.
   const summarizeExec =
@@ -65,14 +78,14 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
   return {
     hostsList: (): Promise<string> =>
       auditor.audited(
-        call("hosts_list", Option.none<string>()),
+        call("hosts_list", Option.none<string>(), ALLOW),
         () => Promise.resolve(JSON.stringify(runner.status())),
         noSummary,
       ),
     /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
     exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
       const r = await auditor.audited(
-        call("exec", Option(host), { command }),
+        gated(host, { tool: "exec", agent: AGENT_UNKNOWN, command }, { command }),
         () => runner.exec(host, command),
         summarizeExec(host),
       )
@@ -81,7 +94,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
     },
     tmuxList: ({ host }: { host: string }): Promise<string> =>
       auditor.audited(
-        call("tmux_list", Option(host)),
+        gated(host, { tool: "tmux_list", agent: AGENT_UNKNOWN }),
         async () => JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host))))),
         noSummary,
       ),
@@ -99,7 +112,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
       const target = session ?? runner.sessionFor(host)
       const press = submit ?? true
       return auditor.audited(
-        call("tmux_send", Option(host), { session: target, input, submit: press }),
+        gated(host, { tool: "tmux_send", agent: AGENT_UNKNOWN }, { session: target, input, submit: press }),
         async () => {
           unwrap(await tmuxSend(unwrap(runner.tmuxRunnerFor(host)), { session: target, input, submit: press }))
           return `[${host}] sent to tmux session "${target}".`
@@ -111,7 +124,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
       const target = session ?? runner.sessionFor(host)
       const count = lines ?? 200
       return auditor.audited(
-        call("tmux_read", Option(host), { session: target, lines: count }),
+        gated(host, { tool: "tmux_read", agent: AGENT_UNKNOWN }, { session: target, lines: count }),
         async () => unwrap(await tmuxRead(unwrap(runner.tmuxRunnerFor(host)), { session: target, lines: count })),
         (transcript) => ({ stdout_bytes: bytes(transcript) }),
       )
@@ -119,7 +132,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
     tmuxKeys: ({ host, session, keys }: { host: string; session?: string; keys: string[] }): Promise<string> => {
       const target = session ?? runner.sessionFor(host)
       return auditor.audited(
-        call("tmux_keys", Option(host), { session: target, keys }),
+        gated(host, { tool: "tmux_keys", agent: AGENT_UNKNOWN }, { session: target, keys }),
         async () => {
           unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host)), { session: target, keys }))
           return `[${host}] sent keys [${keys.join(", ")}] to tmux session "${target}".`
@@ -153,6 +166,8 @@ async function main(): Promise<void> {
     },
     (f) => f,
   )
+
+  fleetWarnings(fleet).forEach((w) => console.error(`warning: ${w}`))
 
   // Fail fast: no call may run unaudited, so an unwritable audit log stops startup.
   const sink = openAuditLog(fleet.audit.path).fold(
