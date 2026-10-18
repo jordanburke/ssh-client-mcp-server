@@ -1,7 +1,16 @@
 import { type Either } from "functype"
 import { describe, expect, it } from "vitest"
 
-import { EMPTY_TABLE, type HostPolicy, parsePolicyTable, type PolicyTable, resolvePolicy } from "../src/policy.js"
+import {
+  EMPTY_TABLE,
+  evaluate,
+  type HostPolicy,
+  parsePolicyTable,
+  type PolicyRequest,
+  type PolicyTable,
+  resolvePolicy,
+  type Verdict,
+} from "../src/policy.js"
 
 const W = 'host "a": policy'
 
@@ -103,5 +112,134 @@ describe("parsePolicyTable / resolvePolicy", () => {
 
   it("agents = [] is not set", () => {
     expect(resolved({}, { agents: [] }).agents.isNone()).toBe(true)
+  })
+})
+
+const exec = (command: string, agent = "unknown"): PolicyRequest => ({ tool: "exec", agent, command })
+const tool = (name: "tmux_list" | "tmux_send" | "tmux_read" | "tmux_keys", agent = "unknown"): PolicyRequest => ({
+  tool: name,
+  agent,
+})
+const ruleOf = (v: Verdict): string => (v.decision === "allow" ? v.rule.orElse("") : v.rule)
+const reasonOf = (v: Verdict): string => (v.decision === "deny" ? v.reason : "")
+
+const META = "command contains a newline or shell metacharacter"
+const metaRows = [
+  "cmd; rm",
+  "cmd && x",
+  "cmd | x",
+  "cmd $(x)",
+  "cmd `x`",
+  "cmd > f",
+  "cmd < f",
+  "cmd {a,b}",
+  "cmd\nx",
+  "cmd\0x",
+  "cmd \\x",
+  "cmd 'x'",
+  'cmd "x"',
+  "ls *",
+  "ls ?",
+  "ls [ab]",
+  "cat ~/x",
+].map((cmd): [string, unknown, PolicyRequest, "allow" | "deny", string, string] => [
+  `metacharacter ${JSON.stringify(cmd)}`,
+  { mode: "readonly", allow: [".*"] },
+  exec(cmd),
+  "deny",
+  "readonly",
+  META,
+])
+
+const rows: ReadonlyArray<[string, unknown, PolicyRequest, "allow" | "deny", string, string]> = [
+  ["deny mode denies exec", { mode: "deny" }, exec("ls"), "deny", "deny", "host is closed by policy"],
+  ["deny mode denies tmux_read", { mode: "deny" }, tool("tmux_read"), "deny", "deny", ""],
+  ["deny is checked before agents", { mode: "deny", agents: ["unknown"] }, exec("ls"), "deny", "deny", ""],
+  [
+    "agents is checked before the allow list",
+    { mode: "readonly", allow: ["uptime"], agents: ["claude"] },
+    exec("uptime"),
+    "deny",
+    "agents",
+    "",
+  ],
+  ["agents excludes unknown", { agents: ["claude"] }, exec("ls"), "deny", "agents", 'agent "unknown" is not in agents'],
+  ["agents match by name", { agents: ["claude"] }, exec("ls", "claude"), "allow", "readwrite", ""],
+  ["agents match by name@instance", { agents: ["claude"] }, exec("ls", "claude@laptop"), "allow", "readwrite", ""],
+  ["agents are not a plain prefix", { agents: ["claude"] }, exec("ls", "claudex"), "deny", "agents", ""],
+  ["agents match the name before @", { agents: ["claude"] }, exec("ls", "x@claude"), "deny", "agents", ""],
+  [
+    "readonly allows an allowlisted command",
+    { mode: "readonly", allow: ["uptime"] },
+    exec("uptime"),
+    "allow",
+    "readonly",
+    "",
+  ],
+  [
+    "readonly is a full match",
+    { mode: "readonly", allow: ["uptime"] },
+    exec("uptime --help"),
+    "deny",
+    "readonly",
+    "command not in allow list",
+  ],
+  ["trailing space is not trimmed", { mode: "readonly", allow: ["uptime"] }, exec("uptime "), "deny", "readonly", ""],
+  ["alternation: df -h", { mode: "readonly", allow: ["df -h|uptime"] }, exec("df -h"), "allow", "readonly", ""],
+  ["alternation: uptime", { mode: "readonly", allow: ["df -h|uptime"] }, exec("uptime"), "allow", "readonly", ""],
+  [
+    "alternation is anchored: xuptime",
+    { mode: "readonly", allow: ["df -h|uptime"] },
+    exec("xuptime"),
+    "deny",
+    "readonly",
+    "",
+  ],
+  [
+    "alternation is anchored: df -hx",
+    { mode: "readonly", allow: ["df -h|uptime"] },
+    exec("df -hx"),
+    "deny",
+    "readonly",
+    "",
+  ],
+  ...metaRows,
+  ["carriage return is a newline", { mode: "readonly", allow: [".*"] }, exec("cmd\rx"), "deny", "readonly", META],
+  ["a tab is not a metacharacter", { mode: "readonly", allow: ["echo\\ta"] }, exec("echo\ta"), "allow", "readonly", ""],
+  [
+    "readonly denies tmux_send",
+    { mode: "readonly" },
+    tool("tmux_send"),
+    "deny",
+    "readonly",
+    "tmux input is not allowed on a readonly host",
+  ],
+  ["readonly allows tmux_read", { mode: "readonly" }, tool("tmux_read"), "allow", "readonly", ""],
+  [
+    "readwrite needs_approval matches anywhere",
+    { needs_approval: ["rm"] },
+    exec("sudo rm -rf x"),
+    "deny",
+    "needs_approval",
+    'matches "rm" and needs approval, which is not available yet',
+  ],
+  ["readwrite allows anything else", {}, exec("ls"), "allow", "readwrite", ""],
+  [
+    "tmux approve denies tmux_keys",
+    { tmux: "approve" },
+    tool("tmux_keys"),
+    "deny",
+    "tmux",
+    "tmux input requires approval, which is not available yet",
+  ],
+  ["tmux open allows tmux_send", {}, tool("tmux_send"), "allow", "readwrite", ""],
+]
+
+describe("evaluate", () => {
+  it.each(rows)("%s", (_name, host, req, decision, rule, reason) => {
+    const v = evaluate(resolved({}, host), req)
+    expect(v.decision).toBe(decision)
+    expect(ruleOf(v)).toBe(rule)
+    if (reason) expect(reasonOf(v)).toBe(reason)
   })
 })

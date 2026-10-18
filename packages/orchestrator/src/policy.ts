@@ -152,3 +152,61 @@ export const resolvePolicy = (
         agents: agents.length > 0 ? Option<ReadonlyArray<string>>(agents) : Option.none<ReadonlyArray<string>>(),
       })
 }
+
+export type PolicyTool = "exec" | "tmux_list" | "tmux_send" | "tmux_read" | "tmux_keys"
+
+// Only exec carries a command.
+export type PolicyRequest =
+  | Readonly<{ tool: "exec"; agent: string; command: string }>
+  | Readonly<{ tool: Exclude<PolicyTool, "exec">; agent: string }>
+
+// `rule` is the short rule name; the auditor qualifies it with the host.
+export type Verdict =
+  Readonly<{ decision: "allow"; rule: Option<string> }> | Readonly<{ decision: "deny"; rule: string; reason: string }>
+
+// For host-less tools and unknown hosts: no policy applies.
+export const ALLOW: Verdict = { decision: "allow", rule: Option.none<string>() }
+
+const allowBy = (rule: string): Verdict => ({ decision: "allow", rule: Option(rule) })
+const denyBy = (rule: string, reason: string): Verdict => ({ decision: "deny", rule, reason })
+
+// Line breaks, NUL, and every character the remote `$SHELL -c` gives meaning to: control
+// operators, substitution, redirection, grouping, escapes, quotes, globs and `~`.
+const READONLY_REJECT = /[\n\r\0;&|$`()<>{}\\'"*?[~]/
+
+const listed = (agents: ReadonlyArray<string>, agent: string): boolean =>
+  agents.some((e) => agent === e || agent.startsWith(`${e}@`))
+
+const evaluateTmuxInput = (policy: HostPolicy): Verdict => {
+  if (policy.mode === "readonly") return denyBy("readonly", "tmux input is not allowed on a readonly host")
+  return policy.tmux === "approve"
+    ? denyBy("tmux", "tmux input requires approval, which is not available yet")
+    : allowBy("readwrite")
+}
+
+const evaluateExec = (policy: HostPolicy, command: string): Verdict => {
+  if (policy.mode === "readonly") {
+    if (READONLY_REJECT.test(command)) return denyBy("readonly", "command contains a newline or shell metacharacter")
+    return policy.allow.some((re) => re.test(command))
+      ? allowBy("readonly")
+      : denyBy("readonly", "command not in allow list")
+  }
+  const tripped = policy.needsApproval.find((re) => re.test(command))
+  return tripped === undefined
+    ? allowBy("readwrite")
+    : denyBy("needs_approval", `matches "${tripped.source}" and needs approval, which is not available yet`)
+}
+
+// First match wins: deny mode, then the agents list, then the per-tool rules.
+export const evaluate = (policy: HostPolicy, req: PolicyRequest): Verdict => {
+  if (policy.mode === "deny") return denyBy("deny", "host is closed by policy")
+  if (
+    policy.agents.fold(
+      () => false,
+      (agents) => !listed(agents, req.agent),
+    )
+  )
+    return denyBy("agents", `agent "${req.agent}" is not in agents`)
+  if (req.tool === "exec") return evaluateExec(policy, req.command)
+  return req.tool === "tmux_send" || req.tool === "tmux_keys" ? evaluateTmuxInput(policy) : allowBy(policy.mode)
+}
