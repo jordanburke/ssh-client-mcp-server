@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { parseFleet } from "../src/fleet.js"
+import { fleetWarnings, parseFleet } from "../src/fleet.js"
 
 const base = `
 [[hosts]]
@@ -71,6 +71,63 @@ key = "/keys/id_b"
     const r = parseFleet(`${base}log_output = "yes"\n`)
     expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain('host "box-a": log_output must be true or false')
+  })
+
+  it("hosts get the built-in policy by default", () => {
+    const p = parseFleet(base).map((f) => f.hosts[0].policy)
+    expect(p.map((x) => x.mode).orElse("deny")).toBe("readwrite")
+    expect(p.map((x) => x.tmux).orElse("approve")).toBe("open")
+  })
+
+  it("reads [defaults.policy] and [hosts.policy]", () => {
+    const r = parseFleet(`[defaults.policy]
+mode = "readwrite"
+tmux = "approve"
+${base}
+[hosts.policy]
+mode = "readonly"
+allow = ["uptime"]
+`)
+    if (r.isLeft()) throw new Error(r.value)
+    const p = r.value.hosts[0].policy
+    expect(p.mode).toBe("readonly")
+    expect(p.allow).toHaveLength(1)
+    expect(p.tmux).toBe("approve")
+  })
+
+  it("reports policy errors with the host name", () => {
+    const r = parseFleet(`${base}\n[hosts.policy]\nmode = "nope"\n`)
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value).toContain('host "box-a": policy.mode must be one of readonly, readwrite, deny')
+  })
+
+  it("reports a defaults.policy error once", () => {
+    const r = parseFleet(`[defaults.policy]
+tmux = "x"
+${base}
+[[hosts]]
+name = "box-b"
+host = "10.0.0.12"
+key = "/keys/id_b"
+`)
+    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) expect(r.value.split("defaults.policy.tmux must be approve or open")).toHaveLength(2)
+  })
+
+  it("warns for each host with agents set", () => {
+    const r = parseFleet(`${base}
+[hosts.policy]
+agents = ["claude"]
+
+[[hosts]]
+name = "box-b"
+host = "10.0.0.12"
+key = "/keys/id_b"
+`)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(fleetWarnings(r.value)).toEqual([
+      'host "box-a": policy.agents is set, so every call is denied until agent identity is available',
+    ])
   })
 
   it("reads pool settings with defaults", () => {

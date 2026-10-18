@@ -73,6 +73,28 @@ agent = true
     await r.value.shutdown()
   })
 
+  it("policyFor returns the host policy", async () => {
+    const f = parseFleet(`
+[[hosts]]
+name = "box-a"
+host = "10.0.0.11"
+agent = true
+  [hosts.policy]
+  mode = "readonly"
+`)
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(
+      r.value
+        .policyFor("box-a")
+        .map((p) => p.mode)
+        .orElse("deny"),
+    ).toBe("readonly")
+    expect(r.value.policyFor("nope").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
   it("errors the tmux runner for an unknown host", async () => {
     if (fleet.isLeft()) throw new Error(fleet.value)
     const r = await buildFleetRunner(fleet.value, connect)

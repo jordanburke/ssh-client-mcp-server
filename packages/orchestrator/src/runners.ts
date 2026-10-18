@@ -6,10 +6,11 @@ import {
   resolveAuth,
   type TmuxRunner,
 } from "@ssh-mcp/core"
-import { Either, Left, Map, Right, Set } from "functype"
+import { Either, Left, Map, type Option, Right, Set } from "functype"
 import { type ConnectConfig } from "ssh2"
 
 import { type Fleet, type HostEntry } from "./fleet.js"
+import { type HostPolicy } from "./policy.js"
 
 export type FleetRunner = Readonly<{
   hostNames: string[]
@@ -17,6 +18,7 @@ export type FleetRunner = Readonly<{
   exec: (host: string, command: string) => Promise<CommandResult>
   sessionFor: (host: string) => string
   logOutputFor: (host: string) => boolean
+  policyFor: (host: string) => Option<HostPolicy>
   status: () => HostStatus[]
   shutdown: () => Promise<void>
 }>
@@ -52,6 +54,7 @@ const makeRunner = (
 ): FleetRunner => {
   const sessions = Map.of(...fleet.hosts.map((h): [string, string] => [h.name, h.tmuxSession]))
   const logOutput = Map.of(...fleet.hosts.map((h): [string, boolean] => [h.name, h.logOutput]))
+  const policies = Map.of(...fleet.hosts.map((h): [string, HostPolicy] => [h.name, h.policy]))
   const pool = createPool(resolved, fleet.pool, connect)
   const names = Set.of(...resolved.map((r) => r.name))
 
@@ -59,6 +62,7 @@ const makeRunner = (
     hostNames: [...names],
     sessionFor: (host) => sessions.get(host).orElse("agent"),
     logOutputFor: (host) => logOutput.get(host).orElse(false),
+    policyFor: (host) => policies.get(host),
     tmuxRunnerFor: (host) =>
       names.has(host)
         ? Right<string, TmuxRunner>((command) => pool.run(host, command))

@@ -1,9 +1,10 @@
-import { Left, Right } from "functype"
+import { Left, Option, Right } from "functype"
 import { describe, expect, it } from "vitest"
 import { type CommandResult } from "@ssh-mcp/core"
 
 import { createAuditor } from "../src/audit.js"
 import { makeHandlers } from "../src/index.js"
+import { type HostPolicy } from "../src/policy.js"
 import { type FleetRunner } from "../src/runners.js"
 
 const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code: 0 }) => {
@@ -12,6 +13,7 @@ const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code
     hostNames: ["box-a", "box-b"],
     sessionFor: () => "agent",
     logOutputFor: () => false,
+    policyFor: () => Option.none<HostPolicy>(),
     tmuxRunnerFor: (host) => Right((command: string) => run(host, command)),
     exec: (host, command) => run(host, command),
     status: () => [
