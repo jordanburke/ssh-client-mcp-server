@@ -22,6 +22,7 @@ import {
   openAuditLog,
 } from "./audit.js"
 import { parseFleet } from "./fleet.js"
+import { ALLOW } from "./policy.js"
 import { buildFleetRunner, type FleetRunner } from "./runners.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
@@ -48,6 +49,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
     tool,
     host,
     fields,
+    verdict: ALLOW,
   })
 
   // Sizes only, unless the host opts in to an output excerpt with log_output.
