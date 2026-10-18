@@ -7,6 +7,7 @@ import { UserError } from "somamcp"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { AGENT_UNKNOWN, type AuditCall, type AuditSink, createAuditor, excerpt, openAuditLog } from "../src/audit.js"
+import { ALLOW, type Verdict } from "../src/policy.js"
 
 const clock = () => {
   const times = [new Date("2026-10-17T14:02:11.000Z"), new Date("2026-10-17T14:02:11.412Z")]
@@ -30,6 +31,7 @@ const execCall: AuditCall = {
   tool: "exec",
   host: Option("box-a"),
   fields: { command: "uptime" },
+  verdict: ALLOW,
 }
 
 const auditorWith = (sink: AuditSink) => createAuditor({ sink, now: clock(), newId: () => "id-1" })
@@ -128,6 +130,62 @@ describe("createAuditor", () => {
     await expect(result).rejects.toThrow("after execution")
   })
 
+  it("an allow verdict with a rule records it", async () => {
+    const { lines, sink } = memory()
+    await auditorWith(sink).audited(
+      { ...execCall, verdict: { decision: "allow", rule: Option("readonly") } },
+      async () => 1,
+      () => ({}),
+    )
+    expect(JSON.parse(lines[0])).toMatchObject({ decision: "allow", rule: "box-a:readonly" })
+  })
+
+  it("an allow verdict without a rule omits rule", async () => {
+    const { lines, sink } = memory()
+    await auditorWith(sink).audited(
+      execCall,
+      async () => 1,
+      () => ({}),
+    )
+    expect("rule" in JSON.parse(lines[0])).toBe(false)
+  })
+
+  const denied: Verdict = { decision: "deny", rule: "readonly", reason: "command not in allow list" }
+
+  it("a deny verdict writes one line and never runs", async () => {
+    const { lines, sink } = memory()
+    const ran = { called: false }
+    const result = auditorWith(sink).audited(
+      { ...execCall, verdict: denied },
+      async () => {
+        ran.called = true
+        return 1
+      },
+      () => ({}),
+    )
+    await expect(result).rejects.toBeInstanceOf(UserError)
+    await expect(result).rejects.toThrow(/^\[box-a\] denied by rule readonly: command not in allow list$/)
+    expect(ran.called).toBe(false)
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0])).toMatchObject({
+      event: "decision",
+      decision: "deny",
+      rule: "box-a:readonly",
+      reason: "command not in allow list",
+    })
+  })
+
+  it('a failed deny-line write is still "call not executed"', async () => {
+    const { sink } = memory([1])
+    const result = auditorWith(sink).audited(
+      { ...execCall, verdict: denied },
+      async () => 1,
+      () => ({}),
+    )
+    await expect(result).rejects.toBeInstanceOf(UserError)
+    await expect(result).rejects.toThrow("call not executed")
+  })
+
   it("a command with a newline stays one line", async () => {
     const { lines, sink } = memory()
     const command = 'echo "a"\nrm x'
@@ -143,7 +201,7 @@ describe("createAuditor", () => {
   it("omits host for host-less tools", async () => {
     const { lines, sink } = memory()
     await auditorWith(sink).audited(
-      { agent: AGENT_UNKNOWN, tool: "hosts_list", host: Option.none<string>(), fields: {} },
+      { agent: AGENT_UNKNOWN, tool: "hosts_list", host: Option.none<string>(), fields: {}, verdict: ALLOW },
       async () => 1,
       () => ({}),
     )

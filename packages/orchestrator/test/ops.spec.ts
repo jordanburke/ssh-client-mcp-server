@@ -1,9 +1,10 @@
-import { Left, Right } from "functype"
+import { Left, Option, Right } from "functype"
 import { describe, expect, it } from "vitest"
 import { type CommandResult } from "@ssh-mcp/core"
 
 import { createAuditor } from "../src/audit.js"
 import { makeHandlers } from "../src/index.js"
+import { EMPTY_TABLE, type HostPolicy, parsePolicyTable, resolvePolicy } from "../src/policy.js"
 import { type FleetRunner } from "../src/runners.js"
 
 const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code: 0 }) => {
@@ -12,6 +13,7 @@ const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code
     hostNames: ["box-a", "box-b"],
     sessionFor: () => "agent",
     logOutputFor: () => false,
+    policyFor: () => Option.none<HostPolicy>(),
     tmuxRunnerFor: (host) => Right((command: string) => run(host, command)),
     exec: (host, command) => run(host, command),
     status: () => [
@@ -169,5 +171,74 @@ describe("audit", () => {
       expect(decisionAt).toBeGreaterThanOrEqual(0)
       expect(decisionAt).toBeLessThan(resultAt)
     })
+  })
+})
+
+const policyOf = (raw: unknown): HostPolicy =>
+  resolvePolicy("test", EMPTY_TABLE, parsePolicyTable(raw, "test").orThrow()).orThrow()
+
+const withPolicy = (runner: FleetRunner, raw: unknown): FleetRunner => ({
+  ...runner,
+  policyFor: () => Option(policyOf(raw)),
+})
+
+describe("policy", () => {
+  it("no policy configured: every tool still runs", async () => {
+    const { runner } = recording({ stdout: "", stderr: "", code: 0 })
+    const { h, parsed } = withAudit(withPolicy(runner, undefined))
+    await h.exec({ host: "box-a", command: "ls" })
+    await h.tmuxSend({ host: "box-a", input: "ls" })
+    await h.tmuxKeys({ host: "box-a", keys: ["C-c"] })
+    await h.tmuxRead({ host: "box-a" })
+    await h.tmuxList({ host: "box-a" })
+    const decisions = parsed().filter((l) => l.event === "decision")
+    expect(decisions).toHaveLength(5)
+    expect(decisions.every((l) => l.decision === "allow")).toBe(true)
+  })
+
+  it("readonly host denies exec outside the allow list without running it", async () => {
+    const { runner, calls } = recording()
+    const { h, parsed } = withAudit(withPolicy(runner, { mode: "readonly", allow: ["uptime"] }))
+    await expect(h.exec({ host: "box-a", command: "rm x" })).rejects.toThrow(
+      "[box-a] denied by rule readonly: command not in allow list",
+    )
+    expect(calls).toEqual([])
+    expect(parsed()).toHaveLength(1)
+    expect(parsed()[0]).toMatchObject({ decision: "deny" })
+  })
+
+  it("readonly host allows an allowlisted exec", async () => {
+    const { runner } = recording()
+    const { h, parsed } = withAudit(withPolicy(runner, { mode: "readonly", allow: ["uptime"] }))
+    await h.exec({ host: "box-a", command: "uptime" })
+    expect(parsed()[0]).toMatchObject({ decision: "allow", rule: "box-a:readonly" })
+  })
+
+  it("readonly host denies tmux_send", async () => {
+    const { runner, calls } = recording()
+    const { h } = withAudit(withPolicy(runner, { mode: "readonly" }))
+    await expect(h.tmuxSend({ host: "box-a", input: "ls" })).rejects.toThrow("denied by rule readonly")
+    expect(calls).toEqual([])
+  })
+
+  it("needs_approval denies a matching exec", async () => {
+    const { runner, calls } = recording()
+    const { h } = withAudit(withPolicy(runner, { needs_approval: ["sudo"] }))
+    await expect(h.exec({ host: "box-a", command: "sudo ls" })).rejects.toThrow("denied by rule needs_approval")
+    expect(calls).toEqual([])
+  })
+
+  it("an unknown host is not a policy denial", async () => {
+    const { runner } = recording()
+    const failing: FleetRunner = {
+      ...runner,
+      exec: async () => {
+        throw new Error('unknown host "z"')
+      },
+    }
+    const { h, parsed } = withAudit(failing)
+    await expect(h.exec({ host: "z", command: "ls" })).rejects.toThrow(/unknown host/)
+    expect(parsed()[0]).toMatchObject({ decision: "allow" })
+    expect("rule" in parsed()[0]).toBe(false)
   })
 })

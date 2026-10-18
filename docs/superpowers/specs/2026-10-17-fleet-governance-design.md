@@ -219,8 +219,10 @@ agent = true
 1. Host `mode = "deny"`.
 2. Agent not listed in `agents`.
 3. **`readonly`:**
-   - Reject the command if it contains a newline or a shell metacharacter
-     (`; & | $ \` ( ) < > { }`).
+   - Reject the command if it contains a newline, carriage return, NUL or a
+     shell metacharacter (`; & | $ \` ( ) < > { } \ ' " * ? [ ~`). Commands run
+     under the remote shell, where quotes, escapes, globs and `~` all carry
+     meaning, so a loose `allow` pattern can't let them through.
    - Otherwise, require a full match against some `allow` pattern. Patterns are
      implicitly wrapped as `^(?:…)$`, so a match covers the whole command.
 4. **`readwrite`:**
@@ -245,6 +247,11 @@ agent = true
 - **The real boundary is the remote account.** It is the account named by the
   host entry's `user`, plus that account's `sudoers`. The docs must show a
   sample restricted account.
+- **Command length cap.** Policy regexes run synchronously, so a badly
+  backtracking pattern could stall the whole hub. A command longer than 4096
+  characters is denied whenever policy patterns would run against it: on any
+  `readonly` host, and on a `readwrite` host with `needs_approval`. Hosts with
+  no patterns accept any length.
 - **Startup validation.** Policy checks join the existing fail-fast checks:
   - an invalid regex
   - an unknown `mode` or `tmux` value

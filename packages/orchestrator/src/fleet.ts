@@ -3,6 +3,7 @@ import { type Either, Left, List, Option, Right, Try } from "functype"
 import { parse as parseToml } from "smol-toml"
 
 import { DEFAULT_AUDIT_PATH } from "./audit.js"
+import { EMPTY_TABLE, type HostPolicy, parsePolicyTable, type PolicyTable, resolvePolicy } from "./policy.js"
 
 export type HostEntry = Readonly<{
   name: string
@@ -12,6 +13,7 @@ export type HostEntry = Readonly<{
   auth: ResolveAuthOptions
   tmuxSession: string
   logOutput: boolean
+  policy: HostPolicy
 }>
 
 export type PoolSettings = Readonly<{ maxPerHost: number; idleTimeoutMs: number; acquireTimeoutMs: number }>
@@ -82,6 +84,9 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
   const defaultUser = str(defaults.user)
   const defaultSession = str(defaults.tmux_session).orElse("agent")
   const rawHosts = Array.isArray(raw.hosts) ? (raw.hosts as RawHost[]) : []
+  // Parsed once; if it fails, hosts resolve against EMPTY_TABLE so its errors appear once.
+  const defaultsPolicy = parsePolicyTable(defaults.policy, "defaults.policy")
+  const defaultsTable: PolicyTable = defaultsPolicy.orElse(EMPTY_TABLE)
 
   if (rawHosts.length === 0) return Left<string, Fleet>("Fleet config has no [[hosts]] entries")
 
@@ -95,25 +100,38 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
     if (address.isNone()) return Left<string, HostEntry>(`host "${name}": missing host address`)
     if (h.log_output !== undefined && typeof h.log_output !== "boolean")
       return Left<string, HostEntry>(`host "${name}": log_output must be true or false`)
-    return resolveHostAuth(name, h).map((auth) => ({
-      name,
-      host: address.orElse(""),
-      port: num(h.port).orElse(defaultPort),
-      user: str(h.user).or(defaultUser),
-      auth,
-      tmuxSession: str(h.tmux_session).orElse(defaultSession),
-      logOutput: h.log_output === true,
-    }))
+    const where = `host "${name}": policy`
+    const policy = parsePolicyTable(h.policy, where)
+      .flatMap((table) => resolvePolicy(where, defaultsTable, table))
+      .mapLeft((errs) => errs.join("\n"))
+    return resolveHostAuth(name, h).flatMap((auth) =>
+      policy.map((p) => ({
+        name,
+        host: address.orElse(""),
+        port: num(h.port).orElse(defaultPort),
+        user: str(h.user).or(defaultUser),
+        auth,
+        tmuxSession: str(h.tmux_session).orElse(defaultSession),
+        logOutput: h.log_output === true,
+        policy: p,
+      })),
+    )
   }
 
   const audit = parseAudit(raw)
   const results = rawHosts.map(parseHost)
-  const errors = [audit, ...results].flatMap((r) =>
-    r.fold<string[]>(
-      (msg) => [msg],
+  const errors = [
+    ...defaultsPolicy.fold(
+      (errs) => [...errs],
       () => [],
     ),
-  )
+    ...[audit, ...results].flatMap((r) =>
+      r.fold<string[]>(
+        (msg) => [msg],
+        () => [],
+      ),
+    ),
+  ]
   const hosts = results.flatMap((r) =>
     r.fold<HostEntry[]>(
       () => [],
@@ -125,3 +143,9 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
     ? Left<string, Fleet>(`Fleet config errors:\n${List(errors).toArray().join("\n")}`)
     : Right<string, Fleet>({ hosts, pool: parsePool(raw), audit: audit.orElse({ path: DEFAULT_AUDIT_PATH }) })
 }
+
+// Hosts that will deny every call until agent identity exists (the agent is "unknown" until then).
+export const fleetWarnings = (fleet: Fleet): ReadonlyArray<string> =>
+  fleet.hosts
+    .filter((h) => h.policy.agents.isSome())
+    .map((h) => `host "${h.name}": policy.agents is set, so every call is denied until agent identity is available`)

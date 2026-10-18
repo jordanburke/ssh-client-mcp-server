@@ -5,6 +5,8 @@ import { type Either, Left, type Option, Right, Try, type Wire } from "functype"
 import { Path } from "functype-os"
 import { UserError } from "somamcp"
 
+import { type Verdict } from "./policy.js"
+
 export const AGENT_UNKNOWN = "unknown"
 export const DEFAULT_AUDIT_PATH = "~/.local/state/ssh-fleet/audit.jsonl"
 export const EXCERPT_CHARS = 1024
@@ -12,7 +14,13 @@ export const EXCERPT_CHARS = 1024
 // Tool-specific fields of an audit line, in the shape written to disk.
 export type AuditFields = Wire<Readonly<Record<string, string | number | boolean | ReadonlyArray<string> | undefined>>>
 
-export type AuditCall = Readonly<{ agent: string; tool: string; host: Option<string>; fields: AuditFields }>
+export type AuditCall = Readonly<{
+  agent: string
+  tool: string
+  host: Option<string>
+  fields: AuditFields
+  verdict: Verdict
+}>
 
 // Appends one line to the audit log; throws on failure.
 export type AuditSink = (line: string) => void
@@ -28,6 +36,24 @@ export const excerpt = (s: string): string => Array.from(s).slice(0, EXCERPT_CHA
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+// Rules are host-qualified in the log (`box-a:readonly`), as the spec's examples show.
+const qualify = (host: Option<string>, rule: string): string =>
+  host.fold(
+    () => rule,
+    (h) => `${h}:${rule}`,
+  )
+
+const verdictFields = (call: AuditCall): Readonly<Record<string, string>> =>
+  call.verdict.decision === "allow"
+    ? {
+        decision: "allow",
+        ...call.verdict.rule.fold(
+          () => ({}),
+          (rule) => ({ rule: qualify(call.host, rule) }),
+        ),
+      }
+    : { decision: "deny", rule: qualify(call.host, call.verdict.rule), reason: call.verdict.reason }
+
 /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
 export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
   const write = (line: Readonly<Record<string, unknown>>, failure: string): void =>
@@ -39,7 +65,8 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
     )
 
   // A decision line is written before the call runs and a result line after it, sharing `id`,
-  // so a call that hangs or crashes the server is still on record.
+  // so a call that hangs or crashes the server is still on record. A denied call never runs, so
+  // it writes only its decision line.
   const audited = async <A>(call: AuditCall, run: () => Promise<A>, summarize: (a: A) => AuditFields): Promise<A> => {
     const id = newId()
     const who = {
@@ -52,9 +79,16 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
     }
     const started = now()
     write(
-      { ts: started.toISOString(), id, event: "decision", ...who, ...call.fields, decision: "allow" },
+      { ts: started.toISOString(), id, event: "decision", ...who, ...call.fields, ...verdictFields(call) },
       "— call not executed",
     )
+    if (call.verdict.decision === "deny") {
+      const prefix = call.host.fold(
+        () => "",
+        (host) => `[${host}] `,
+      )
+      throw new UserError(`${prefix}denied by rule ${call.verdict.rule}: ${call.verdict.reason}`)
+    }
 
     const outcome = await Promise.resolve()
       .then(run)

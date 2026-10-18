@@ -56,6 +56,7 @@ Multi-host fleet MCP server. Entry point: `src/index.ts`.
 
 - **`fleet.ts`** — TOML fleet config parser (`parseFleet`). Enforces the secrets-by-reference rule (inline `password`/`private_key` rejected). Produces a validated `Fleet` with `HostEntry[]` and `PoolSettings`.
 - **`runners.ts`** — `buildFleetRunner` resolves per-host SSH configs and wraps the `@ssh-mcp/core` pool into a `FleetRunner`.
+- **`policy.ts`** — Per-host policy: `parsePolicyTable` / `resolvePolicy` validate `[defaults.policy]` / `[hosts.policy]`; `evaluate` turns a request into an allow/deny `Verdict` (readonly allowlist with a shell-metacharacter reject list, `needs_approval`, tmux gate, `agents`).
 - **`audit.ts`** — `createAuditor` writes a `decision` JSONL line before each tool call and a `result` line after; `openAuditLog` opens the `[audit].path` file (mode `0600`) and fails startup if it can't be written.
 - **`src/index.ts`** — `makeHandlers` + server wiring. Registers `hosts_list`, `exec`, `tmux_list`, `tmux_send`, `tmux_read`, `tmux_keys` (all with a required `host` param).
 - **Config discovery**: `--config=<path>` → `SSH_FLEET_CONFIG` env → `~/.config/ssh-fleet/fleet.toml`.
