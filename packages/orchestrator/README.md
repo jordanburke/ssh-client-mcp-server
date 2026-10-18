@@ -204,6 +204,7 @@ A denied call returns `[<host>] denied by rule <rule>: <reason>` to the agent an
 **Read before relying on it:**
 
 - **`readonly` is an allowlist, on purpose.** There is no deny-list mode: deny-lists over shell text are trivially bypassed (`r''m`, `$(…)`, `sh -c`). Spell out the characters a pattern allows, as in `systemctl status [\w@.-]+`. **Never use `.`, `.*` or `\S` in an `allow` pattern.**
+- **Write patterns as TOML literal strings.** In a TOML double-quoted string `\w` is an invalid escape and fails startup. Use single quotes, `'systemctl status [\w@.-]+'`, or double each backslash, `"systemctl status [\\w@.-]+"`. Patterns have no regex flags, so group an emoji or other astral character before repeating it: `(?:😀)+`.
 - **Avoid nested quantifiers** such as `(\w+ ?)+` in `allow` and `needs_approval`. Patterns run synchronously, and one that backtracks badly can stall the whole server, not just one host. As a backstop, a command longer than 4096 characters is denied whenever policy patterns would be matched against it (any `readonly` host, or a `readwrite` host with `needs_approval`).
 - **`needs_approval` is a tripwire, not a boundary.** It catches honest mistakes; an agent trying to get around it can.
 - **Approval isn't available yet,** so anything that requires approval is **denied**. `tmux = "approve"` is the recommended setting once approval ships; the built-in default is `"open"`.
@@ -265,8 +266,11 @@ idle_timeout_ms = 60000
 [[hosts]]
 name = "box-a"
 host = "10.0.0.11"
-user = "jordan"
+user = "fleet-ro"
 key = "~/.ssh/id_ed25519"
+  [hosts.policy]
+  mode = "readonly"
+  allow = ['sudo systemctl status [\w@.-]+', 'sudo journalctl -u [\w@.-]+ -n \d+', 'df -h', 'uptime']
 
 [[hosts]]
 name = "box-b"

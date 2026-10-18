@@ -255,6 +255,23 @@ describe("evaluate: command length", () => {
     expect(v).toMatchObject({ decision: "deny", rule: "needs_approval", reason: TOO_LONG })
   })
 
+  it("exactly 4096 characters is allowed", () => {
+    const v = evaluate(resolved({}, { mode: "readonly", allow: ["a+"] }), exec("a".repeat(4096)))
+    expect(v.decision).toBe("allow")
+  })
+
+  it("the cap counts characters, not UTF-16 code units", () => {
+    // No regex flags, so an astral character must be grouped to be repeated.
+    const policy = resolved({}, { mode: "readonly", allow: ["(?:😀)+"] })
+    expect(evaluate(policy, exec("😀".repeat(4096))).decision).toBe("allow")
+    expect(evaluate(policy, exec("😀".repeat(4097)))).toMatchObject({ decision: "deny", reason: TOO_LONG })
+  })
+
+  it("a needs_approval denial quotes the pattern as written", () => {
+    const v = evaluate(resolved({}, { needs_approval: ["rm -rf /"] }), exec("rm -rf /tmp/x"))
+    expect(v).toMatchObject({ reason: 'matches "rm -rf /" and needs approval, which is not available yet' })
+  })
+
   it("a long command is allowed on a readwrite host with no needs_approval", () => {
     expect(evaluate(resolved({}, {}), exec(LONG)).decision).toBe("allow")
   })

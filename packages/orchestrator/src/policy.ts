@@ -12,12 +12,15 @@ export type PolicyTable = Readonly<{
   agents: Option<ReadonlyArray<string>>
 }>
 
+// A needs_approval pattern as the operator wrote it, beside its compiled form; denials quote the former.
+export type Tripwire = Readonly<{ pattern: string; re: RegExp }>
+
 // A host's effective policy. `allow` regexes are wrapped `^(?:…)$`; `needsApproval` match anywhere.
 export type HostPolicy = Readonly<{
   mode: PolicyMode
   tmux: TmuxGate
   allow: ReadonlyArray<RegExp>
-  needsApproval: ReadonlyArray<RegExp>
+  needsApproval: ReadonlyArray<Tripwire>
   agents: Option<ReadonlyArray<string>>
 }>
 
@@ -150,7 +153,7 @@ export const resolvePolicy = (
         mode,
         tmux,
         allow: allow.orElse([]),
-        needsApproval: needsApproval.orElse([]),
+        needsApproval: needsApproval.orElse([]).map((re, i) => ({ pattern: needsSrc[i] ?? re.source, re })),
         agents: agents.length > 0 ? Option<ReadonlyArray<string>>(agents) : Option.none<ReadonlyArray<string>>(),
       })
 }
@@ -192,7 +195,8 @@ const evaluateTmuxInput = (policy: HostPolicy): Verdict => {
 }
 
 const evaluateExec = (policy: HostPolicy, command: string): Verdict => {
-  const tooLong = command.length > MAX_COMMAND_CHARS
+  // Counts characters (code points), like `excerpt`; the cheap code-unit length rules most commands out first.
+  const tooLong = command.length > MAX_COMMAND_CHARS && Array.from(command).length > MAX_COMMAND_CHARS
   if (policy.mode === "readonly") {
     if (tooLong) return denyBy("readonly", TOO_LONG)
     if (READONLY_REJECT.test(command)) return denyBy("readonly", "command contains a newline or shell metacharacter")
@@ -201,10 +205,10 @@ const evaluateExec = (policy: HostPolicy, command: string): Verdict => {
       : denyBy("readonly", "command not in allow list")
   }
   if (tooLong && policy.needsApproval.length > 0) return denyBy("needs_approval", TOO_LONG)
-  const tripped = policy.needsApproval.find((re) => re.test(command))
+  const tripped = policy.needsApproval.find((t) => t.re.test(command))
   return tripped === undefined
     ? allowBy("readwrite")
-    : denyBy("needs_approval", `matches "${tripped.source}" and needs approval, which is not available yet`)
+    : denyBy("needs_approval", `matches "${tripped.pattern}" and needs approval, which is not available yet`)
 }
 
 // First match wins: deny mode, then the agents list, then the per-tool rules.
