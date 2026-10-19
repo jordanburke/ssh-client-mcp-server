@@ -1,6 +1,6 @@
 import { unlinkSync } from "node:fs"
 
-import { type Either, Left, Right, Try } from "functype"
+import { type Either, Left, Option, Right, Try } from "functype"
 import { type ConnectConfig } from "ssh2"
 
 import { type Minted } from "./ca.js"
@@ -78,12 +78,18 @@ const execArgs = (c: ConnectConfig, socketPath: string, command: string): Readon
   command,
 ]
 
+// Runs `fn` on the first call; later calls get the same promise.
 const once = (fn: () => Promise<void>): (() => Promise<void>) => {
-  const state: { run: Promise<void> | undefined } = { run: undefined }
-  return () => {
-    state.run ??= fn()
-    return state.run
-  }
+  const state = { run: Option.none<Promise<void>>() }
+  return () =>
+    state.run.fold(
+      () => {
+        const run = fn()
+        state.run = Option(run)
+        return run
+      },
+      (run) => run,
+    )
 }
 
 /** @interop ConnectFactory and PooledConnection are the pool's promise-and-callback contract. */
