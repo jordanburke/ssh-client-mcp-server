@@ -1,4 +1,8 @@
 import { Left, Right } from "functype"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
 import { describe, expect, it, vi } from "vitest"
 
 import { type Minted } from "../src/ca.js"
@@ -66,6 +70,8 @@ const minted = (): Minted & { dispose: ReturnType<typeof vi.fn> } => ({
 
 const sshConfig = { host: "box-a", port: 2222, username: "deploy" }
 
+const socketOf = (args: ReadonlyArray<string>): string => args[args.indexOf("-S") + 1] ?? ""
+
 const depsFor = (proc: ProcessRunner, m: Minted, extra: Partial<OpensshDeps> = {}): OpensshDeps => ({
   proc,
   mintFor: async () => Right<string, Minted>(m),
@@ -86,7 +92,6 @@ describe("opensshConnect", () => {
       "-M",
       "-N",
       "-S",
-      "/run/m-abc.sock",
       "IdentitiesOnly=yes",
       "IdentityAgent=none",
       "IdentityFile=/run/k-1",
@@ -101,10 +106,11 @@ describe("opensshConnect", () => {
     ])
       expect(master.args).toContain(arg)
     expect(master.env.SSH_AUTH_SOCK).toBeUndefined()
+    expect(socketOf(master.args)).toMatch(/^\/run\/m-abc-[0-9a-f]{4}\.sock$/)
   })
 
   it("exec cannot fall back to a direct connection", async () => {
-    const { proc, runs } = fakeProc({ exec: async () => ({ code: 3, stdout: "hi", stderr: "warn" }) })
+    const { proc, runs, spawns } = fakeProc({ exec: async () => ({ code: 3, stdout: "hi", stderr: "warn" }) })
     const conn = await opensshConnect(depsFor(proc, minted())).connect(sshConfig)
     const result = await conn.exec("uptime")
     expect(result).toEqual({ stdout: "hi", stderr: "warn", code: 3 })
@@ -113,7 +119,7 @@ describe("opensshConnect", () => {
       "-F",
       "/dev/null",
       "-S",
-      "/run/m-abc.sock",
+      socketOf(spawns[0].args),
       "-o",
       "ControlMaster=no",
       "-o",
@@ -330,5 +336,40 @@ describe("retirement", () => {
     timers.fire(RETIRE)
     await new Promise((r) => setTimeout(r, 20))
     expect(controlOps(runs)).not.toContain("stop")
+  })
+})
+
+describe("sockets, keepalive and PID files", () => {
+  it("each master gets its own socket, and retirement stops its own", async () => {
+    const { proc, runs, spawns } = fakeProc()
+    const timers = manualTimers()
+    const openssh = opensshConnect(depsFor(proc, minted(), { ...timers, retireAfterMs: RETIRE, drainTimeoutMs: DRAIN }))
+    await openssh.connect(sshConfig)
+    await openssh.connect(sshConfig)
+    const [first, second] = spawns.map((sp) => socketOf(sp.args))
+    expect(first).toMatch(/^\/run\/m-abc-[0-9a-f]{4}\.sock$/)
+    expect(second).toMatch(/^\/run\/m-abc-[0-9a-f]{4}\.sock$/)
+    expect(first).not.toBe(second)
+    timers.fire(RETIRE)
+    await vi.waitFor(() => expect(runs.filter((r) => r.args.includes("stop"))).toHaveLength(2))
+    const stopped = runs.filter((r) => r.args.includes("stop")).map((r) => socketOf(r.args))
+    expect(stopped.sort()).toEqual([first, second].sort())
+  })
+
+  it("masters send keepalives and record their PID while they run", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openssh-"))
+    try {
+      const { proc, spawns } = fakeProc()
+      await opensshConnect(depsFor(proc, minted(), { socketPath: join(dir, "m-abc.sock") })).connect(sshConfig)
+      const args = spawns[0].args
+      expect(args).toContain("ServerAliveInterval=15")
+      expect(args).toContain("ServerAliveCountMax=3")
+      const pidFile = socketOf(args).replace(/\.sock$/, ".pid")
+      expect(readFileSync(pidFile, "utf8")).toBe("4242")
+      spawns[0].fake.fire(255)
+      await vi.waitFor(() => expect(existsSync(pidFile)).toBe(false))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

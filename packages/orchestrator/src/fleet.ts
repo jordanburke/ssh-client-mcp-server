@@ -88,15 +88,43 @@ const parsePool = (raw: Record<string, unknown>): PoolSettings => {
 
 const validPrincipal = (p: string): boolean => p.length > 0 && !p.includes(",")
 
-// `a.b.c.d/n` (n ≤ 32) or an IPv6 address with `/n` (n ≤ 128).
+const ipv4Value = (addr: string): bigint => addr.split(".").reduce((acc, octet) => (acc << 8n) + BigInt(octet), 0n)
+
+// Expands `::`; an IPv6 address with an embedded dotted IPv4 tail is not accepted here.
+const ipv6Value = (addr: string): Option<bigint> => {
+  if (addr.includes(".")) return Option.none<bigint>()
+  const [head, tail = ""] = addr.split("::")
+  const headGroups = head ? head.split(":") : []
+  const tailGroups = addr.includes("::") && tail ? tail.split(":") : []
+  const fill = addr.includes("::") ? 8 - headGroups.length - tailGroups.length : 0
+  const groups = [...headGroups, ...Array.from({ length: fill }, () => "0"), ...tailGroups]
+  return groups.length === 8
+    ? Option(groups.reduce((acc, g) => (acc << 16n) + BigInt(`0x${g || "0"}`), 0n))
+    : Option.none<bigint>()
+}
+
+const hostBitsClear = (value: bigint, width: number, prefix: number): boolean =>
+  (value & ((1n << BigInt(width - prefix)) - 1n)) === 0n
+
+// `a.b.c.d/n` (n ≤ 32) or an IPv6 address with `/n` (n ≤ 128), with no host bits set: ssh-keygen
+// rejects `100.64.0.1/24`, so it must fail here rather than at every connect.
 const validCidr = (v: string): boolean => {
   const parts = v.split("/")
   if (parts.length !== 2) return false
   const [addr, prefix] = parts
   if (!/^\d{1,3}$/.test(prefix)) return false
-  const family = isIP(addr)
   const bits = Number(prefix)
-  return (family === 4 && bits <= 32) || (family === 6 && bits <= 128)
+  const family = isIP(addr)
+  if (family === 4) return bits <= 32 && hostBitsClear(ipv4Value(addr), 32, bits)
+  if (family === 6)
+    return (
+      bits <= 128 &&
+      ipv6Value(addr).fold(
+        () => false,
+        (value) => hostBitsClear(value, 128, bits),
+      )
+    )
+  return false
 }
 
 const parseCa = (c: RawHost): Either<string, CaEntry> => {

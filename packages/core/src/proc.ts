@@ -1,5 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process"
 
+import { Try } from "functype"
+
 export type ProcResult = Readonly<{ code: number; stdout: string; stderr: string }>
 
 // The whole environment a child gets; never merged with process.env.
@@ -18,7 +20,11 @@ export type Child = Readonly<{
 }>
 
 export type ProcessRunner = Readonly<{
-  run: (cmd: string, args: ReadonlyArray<string>, opts: Readonly<{ env: Env; input?: string }>) => Promise<ProcResult>
+  run: (
+    cmd: string,
+    args: ReadonlyArray<string>,
+    opts: Readonly<{ env: Env; input?: string; timeoutMs?: number }>,
+  ) => Promise<ProcResult>
   spawn: (cmd: string, args: ReadonlyArray<string>, opts: Readonly<{ env: Env }>) => Child
 }>
 
@@ -41,16 +47,40 @@ const STDERR_TAIL = 4096
 /** @interop Node's child_process is callback- and event-based; these adapters are the boundary. */
 export const nodeProcessRunner: ProcessRunner = {
   // Resolves with the exit code, non-zero included; rejects only when the program can't start (ENOENT).
-  run: (cmd, args, { env, input }) =>
+  // With `timeoutMs`, the child runs in its own process group with no controlling terminal (so a
+  // prompt fails instead of waiting), and the whole group is killed when time runs out.
+  run: (cmd, args, { env, input, timeoutMs }) =>
     new Promise<ProcResult>((resolve, reject) => {
-      const child = nodeSpawn(cmd, [...args], { env: { ...env }, stdio: ["pipe", "pipe", "pipe"] })
+      const child = nodeSpawn(cmd, [...args], {
+        env: { ...env },
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: timeoutMs !== undefined,
+      })
       const out: Buffer[] = []
       const err: Buffer[] = []
+      const state = { done: false }
+      const finish = (result: ProcResult): void => {
+        if (state.done) return
+        state.done = true
+        clearTimeout(timer)
+        resolve(result)
+      }
+      const timer = setTimeout(
+        () => {
+          const { pid } = child
+          if (pid !== undefined) Try(() => process.kill(-pid, "SIGKILL"))
+          finish({ code: -1, stdout: "", stderr: `timed out after ${timeoutMs ?? 0} ms` })
+        },
+        timeoutMs ?? 2 ** 31 - 1,
+      )
       child.stdout.on("data", (d: Buffer) => out.push(d))
       child.stderr.on("data", (d: Buffer) => err.push(d))
-      child.on("error", reject)
+      child.on("error", (e) => {
+        clearTimeout(timer)
+        reject(e)
+      })
       child.on("close", (code) =>
-        resolve({ code: code ?? -1, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() }),
+        finish({ code: code ?? -1, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() }),
       )
       child.stdin.on("error", () => undefined)
       child.stdin.end(input ?? "")

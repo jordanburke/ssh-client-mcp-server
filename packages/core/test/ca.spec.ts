@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -201,6 +201,29 @@ describe.skipIf(!hasOpenSsh)("CA custody (OpenSSH)", () => {
     expect(second.isRight()).toBe(true)
     expect(alive(firstPid)).toBe(false)
     expect(readdirSync(runtimeDir).filter((f) => f.startsWith("m-"))).toEqual([])
+  })
+
+  it("startup kills a stale master but nothing else", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    mkdirSync(runtimeDir, { recursive: true })
+    // An ssh that hangs waiting for a banner from its ProxyCommand: a stand-in for a master left by a crash.
+    const master = spawn("ssh", ["-F", "/dev/null", "-o", "ProxyCommand=cat", "-o", "BatchMode=yes", "nowhere"], {
+      stdio: "ignore",
+    })
+    const bystander = spawn("sleep", ["30"], { stdio: "ignore" })
+    try {
+      writeFileSync(join(runtimeDir, "m-0123456789ab-aaaa.pid"), String(master.pid))
+      writeFileSync(join(runtimeDir, "m-0123456789ab-bbbb.pid"), String(bystander.pid))
+      await new Promise((r) => setTimeout(r, 200))
+      expect((await start(runtimeDir, [source("home", keys.plain)])).isRight()).toBe(true)
+      await new Promise((r) => setTimeout(r, 200))
+      expect(alive(master.pid ?? 0)).toBe(false)
+      expect(alive(bystander.pid ?? 0)).toBe(true)
+      expect(readdirSync(runtimeDir).filter((f) => f.endsWith(".pid") && f.startsWith("m-"))).toEqual([])
+    } finally {
+      master.kill()
+      bystander.kill()
+    }
   })
 
   it("shutdown removes the runtime dir and stops the agent", async () => {

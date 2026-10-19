@@ -59,22 +59,32 @@ const alive = (pid: number): boolean =>
   )
 
 const isStale = (f: string): boolean =>
-  f === "agent.sock" || f === "agent.pid" || /^m-.*\.sock$/.test(f) || f.startsWith("k-") || /^ca-.*\.pub$/.test(f)
+  f === "agent.sock" ||
+  f === "agent.pid" ||
+  /^m-.*\.(sock|pid)$/.test(f) ||
+  f.startsWith("k-") ||
+  /^ca-.*\.pub$/.test(f)
 
-// A previous run that crashed leaves its agent running (holding the CA key) and its sockets behind;
-// ssh-agent refuses an existing socket path and a stale control socket disables multiplexing.
-// Kill the old agent only if the PID really is an ssh-agent — a reused PID could be anything.
+const readPid = (path: string): number => Try(() => Number(readFileSync(path, "utf8").trim())).orElse(Number.NaN)
+
+// Kills `pid` only if it is alive and `ps` names it `comm` — a reused PID could be anything.
+const killIfStill = async (pid: number, comm: string, proc: ProcessRunner): Promise<void> => {
+  if (!Number.isInteger(pid) || pid <= 0 || !alive(pid)) return
+  const ps = await proc
+    .run("ps", ["-p", String(pid), "-o", "comm="], { env: childEnv() })
+    .catch(() => ({ code: 1, stdout: "", stderr: "" }))
+  if (ps.code !== 0 || ps.stdout.trim() !== comm) return
+  Try(() => process.kill(pid, "SIGTERM"))
+  await waitFor(() => !alive(pid), Date.now() + 2000)
+}
+
+// A previous run that crashed leaves its agent running (holding the CA key), its masters running
+// (holding authenticated sessions to fleet hosts), and its sockets behind; ssh-agent refuses an
+// existing socket path. Kill what is still ours, then clear the files.
 const recover = async (dir: string, proc: ProcessRunner): Promise<void> => {
-  const pid = Try(() => Number(readFileSync(join(dir, "agent.pid"), "utf8").trim())).orElse(Number.NaN)
-  if (Number.isInteger(pid) && pid > 0 && alive(pid)) {
-    const ps = await proc
-      .run("ps", ["-p", String(pid), "-o", "comm="], { env: childEnv() })
-      .catch(() => ({ code: 1, stdout: "", stderr: "" }))
-    if (ps.code === 0 && ps.stdout.includes("ssh-agent")) {
-      Try(() => process.kill(pid, "SIGTERM"))
-      await waitFor(() => !alive(pid), Date.now() + 2000)
-    }
-  }
+  await killIfStill(readPid(join(dir, "agent.pid")), "ssh-agent", proc)
+  const masterPids = readdirSync(dir).filter((f) => /^m-.*\.pid$/.test(f))
+  await Promise.all(masterPids.map((f) => killIfStill(readPid(join(dir, f)), "ssh", proc)))
   readdirSync(dir)
     .filter(isStale)
     .forEach((f) => Try(() => unlinkSync(join(dir, f))))
@@ -176,10 +186,13 @@ const VALIDITY_MS = 10 * 60 * 1000
 // length is the platform limit minus 17: 90 bytes on Linux (108), 86 on macOS (104).
 const MAX_SOCKET_PATH = 86
 
+// Each master adds `-<4 hex>` before `.sock` (see openssh.ts), so two masters never share a path.
+const MASTER_SUFFIX = 5
+
 export const socketPathFor = (runtimeDir: string, agent: string, host: string): Either<string, string> => {
   const digest = createHash("sha256").update(`${agent}\0${host}`).digest("hex").slice(0, 12)
   const path = join(runtimeDir, `m-${digest}.sock`)
-  return Buffer.byteLength(path) <= MAX_SOCKET_PATH
+  return Buffer.byteLength(path) + MASTER_SUFFIX <= MAX_SOCKET_PATH
     ? Right<string, string>(path)
     : Left<string, string>(
         `runtime_dir ${runtimeDir} is too long for control sockets (socket paths must be at most ${MAX_SOCKET_PATH} bytes)`,

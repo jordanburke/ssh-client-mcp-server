@@ -1,4 +1,5 @@
-import { unlinkSync } from "node:fs"
+import { randomBytes } from "node:crypto"
+import { unlinkSync, writeFileSync } from "node:fs"
 
 import { type Either, Left, Option, Right, Try } from "functype"
 import { type ConnectConfig } from "ssh2"
@@ -7,7 +8,8 @@ import { type Minted } from "./ca.js"
 import { type ConnectFactory, type PooledConnection } from "./pool.js"
 import { type Child, childEnv, type ProcessRunner } from "./proc.js"
 
-// One factory serves one (agent, host): its masters all use the same control socket path.
+// One factory serves one (agent, host). `socketPath` is a base: each master gets its own socket
+// beside it (`<base>-<4 hex>.sock`), so a new master never touches one that is still draining.
 export type OpensshDeps = Readonly<{
   proc: ProcessRunner
   mintFor: () => Promise<Either<string, Minted>>
@@ -57,6 +59,11 @@ const masterArgs = (c: ConnectConfig, socketPath: string, knownHosts: string, m:
   `UserKnownHostsFile=${knownHosts}`,
   "-o",
   "ConnectTimeout=10",
+  // A host that stops answering drops the master within about 45 s, instead of it lingering.
+  "-o",
+  "ServerAliveInterval=15",
+  "-o",
+  "ServerAliveCountMax=3",
   ...target(c),
 ]
 
@@ -115,18 +122,18 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
     })
   const live = new globalThis.Set<Readonly<{ child: Child; close: () => void }>>()
 
-  const control = (op: string, c: ConnectConfig) =>
-    proc.run("ssh", ["-F", "/dev/null", "-S", socketPath, "-O", op, ...target(c)], { env: childEnv() })
+  const control = (op: string, sock: string, c: ConnectConfig) =>
+    proc.run("ssh", ["-F", "/dev/null", "-S", sock, "-O", op, ...target(c)], { env: childEnv() })
 
-  const waitReady = (child: Child, c: ConnectConfig, deadline: number): Promise<Either<string, void>> => {
+  const waitReady = (child: Child, sock: string, c: ConnectConfig, deadline: number): Promise<Either<string, void>> => {
     if (child.exited())
       return Promise.resolve(Left<string, void>(`master for ${c.host} exited: ${child.stderr().trim()}`))
     if (Date.now() > deadline)
       return Promise.resolve(Left<string, void>(`master for ${c.host} did not come up: ${child.stderr().trim()}`))
-    return control("check", c).then((r) =>
+    return control("check", sock, c).then((r) =>
       r.code === 0 && !child.exited()
         ? Right<string, void>(undefined)
-        : sleep(100).then(() => waitReady(child, c, deadline)),
+        : sleep(100).then(() => waitReady(child, sock, c, deadline)),
     )
   }
 
@@ -136,11 +143,15 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
     const m = minted.value
     const dispose = once(m.dispose)
 
-    // A stale socket from a crashed run would make this master run without multiplexing.
-    Try(() => unlinkSync(socketPath))
-    const child = proc.spawn("ssh", masterArgs(c, socketPath, knownHosts, m), { env: childEnv() })
+    const sock = socketPath.replace(/\.sock$/, `-${randomBytes(2).toString("hex")}.sock`)
+    const pidFile = sock.replace(/\.sock$/, ".pid")
+    const child = proc.spawn("ssh", masterArgs(c, sock, knownHosts, m), { env: childEnv() })
+    // Recorded so that crash recovery can kill a master the hub no longer knows about.
+    const pid = child.pid()
+    if (pid !== undefined) Try(() => writeFileSync(pidFile, String(pid), { mode: 0o600 }))
+    child.onExit(() => Try(() => unlinkSync(pidFile)))
 
-    const ready = await waitReady(child, c, Date.now() + readyTimeoutMs)
+    const ready = await waitReady(child, sock, c, Date.now() + readyTimeoutMs)
     if (ready.isLeft()) {
       child.kill()
       await dispose()
@@ -166,7 +177,7 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
       if (state.closing || state.retired) return
       state.retired = true
       fireClose()
-      void control("stop", c)
+      void control("stop", sock, c)
         .catch(() => undefined)
         .then(() => drain(child, dispose))
     }
@@ -178,7 +189,7 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
       if (state.closing || state.retired) return
       state.closing = true
       // `-O exit` exits 255 once the master is gone; that is success here, not an error.
-      void control("exit", c)
+      void control("exit", sock, c)
         .catch(() => undefined)
         .then(() => drain(child, dispose))
     }
@@ -189,7 +200,7 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
     const conn: PooledConnection = {
       exec: async (command) => {
         if (child.exited() || state.closing || state.retired) throw new Error(`master for ${c.host} is gone`)
-        const r = await proc.run("ssh", execArgs(c, socketPath, command), { env: childEnv() })
+        const r = await proc.run("ssh", execArgs(c, sock, command), { env: childEnv() })
         return { stdout: r.stdout, stderr: r.stderr, code: r.code }
       },
       close,

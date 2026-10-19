@@ -202,6 +202,16 @@ ca = "home"
     expect(ok.map((f) => f.cas[0].sourceAddress.orElse("")).orElse("")).toBe("100.64.0.1/32")
   })
 
+  it("rejects a source_address with host bits set", () => {
+    const msg = 'ca "home": source_address must be an IPv4 or IPv6 CIDR'
+    expect(leftOf(caBase + `source_address = "100.64.0.1/24"\n` + caHost)).toContain(msg)
+    expect(leftOf(caBase + `source_address = "fd00::1/64"\n` + caHost)).toContain(msg)
+    const net4 = parseFleet(caBase + `source_address = "100.64.0.0/24"\n` + caHost)
+    expect(net4.map((f) => f.cas[0].sourceAddress.orElse("")).orElse("")).toBe("100.64.0.0/24")
+    const net6 = parseFleet(caBase + `source_address = "fd00::/64"\n` + caHost)
+    expect(net6.isRight()).toBe(true)
+  })
+
   it("rejects a host naming an undefined ca", () => {
     expect(leftOf(caBase + caHost.replace('ca = "home"', 'ca = "nope"'))).toContain(
       'host "box-a": ca "nope" is not defined in [[cas]]',

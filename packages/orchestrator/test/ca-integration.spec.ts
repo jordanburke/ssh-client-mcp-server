@@ -2,7 +2,7 @@
 // test runs as the current user (no root, no edits to any real SSH config). It trusts a throwaway CA
 // through TrustedUserCAKeys and AuthorizedPrincipalsFile, and accepts nothing else.
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { connect as netConnect } from "node:net"
 import { tmpdir, userInfo } from "node:os"
 import { dirname, join } from "node:path"
@@ -109,7 +109,13 @@ port = ${port}
 user = "${user}"
 ca = "it"
 `).orThrow()
-    const custody = (await startCaCustody(fx.runtimeDir, fleet.cas.map(caKeySource), nodeProcessRunner)).orThrow()
+    const custody = (
+      await startCaCustody(
+        fx.runtimeDir,
+        fleet.cas.map((c) => caKeySource(c)),
+        nodeProcessRunner,
+      )
+    ).orThrow()
     fx.agentPid = Number(readFileSync(join(fx.runtimeDir, "agent.pid"), "utf8"))
     fx.runner = (
       await buildFleetRunner(
@@ -154,7 +160,18 @@ ca = "it"
 
   it("a stopped master's socket does not fall back", async (ctx) => {
     runner(() => ctx.skip())
-    const sock = socketPathFor(fx.runtimeDir, "unknown", "local").orThrow()
+    // Each master's socket is `<base>-<4 hex>.sock`; find the live one for agent "unknown".
+    const base = socketPathFor(fx.runtimeDir, "unknown", "local")
+      .orThrow()
+      .replace(/\.sock$/, "-")
+    const sock = readdirSync(fx.runtimeDir)
+      .map((f) => join(fx.runtimeDir, f))
+      .find((f) => f.startsWith(base) && f.endsWith(".sock"))
+    if (sock === undefined) throw new Error("no master socket for agent unknown")
+    // Prove the socket is live before stopping it, so the test can't pass against a missing socket.
+    expect(
+      spawnSync("ssh", ["-F", "/dev/null", "-S", sock, "-O", "check", "-p", String(port), `${user}@127.0.0.1`]).status,
+    ).toBe(0)
     const target = ["-p", String(port), `${user}@127.0.0.1`]
     spawnSync("ssh", ["-F", "/dev/null", "-S", sock, "-O", "stop", ...target])
     expect(await waitUntil(() => !existsSync(sock), 5000)).toBe(true)

@@ -1,8 +1,9 @@
-import { chmodSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs"
+import { execFileSync, spawnSync } from "node:child_process"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { Option } from "functype"
+import { Option, Right } from "functype"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   type ConnectFactory,
@@ -11,10 +12,11 @@ import {
   type Openssh,
   type PooledConnection,
   socketPathFor,
+  startCaCustody,
 } from "@ssh-mcp/core"
 
 import { type CaEntry, type Fleet, parseFleet } from "../src/fleet.js"
-import { buildFleetRunner, type CaWiring, caKeySource } from "../src/runners.js"
+import { buildFleetRunner, type CaWiring, caKeySource, selfTestCas } from "../src/runners.js"
 
 const fakeConn: PooledConnection = {
   exec: async (command) => ({ stdout: `out:${command}`, stderr: "", code: 0 }),
@@ -292,5 +294,69 @@ describe("caKeySource", () => {
 
     const cmd = await caKeySource(entry({ kind: "cmd", cmd: "printf KEY" })).key()
     expect(cmd.orElse("")).toBe("KEY\n")
+  })
+})
+
+describe("key_cmd timeout", () => {
+  it("a key_cmd that hangs fails instead of blocking startup", async () => {
+    const entry: CaEntry = {
+      name: "home",
+      key: { kind: "cmd", cmd: "sleep 5" },
+      principal: "fleet",
+      sourceAddress: Option.none(),
+    }
+    const started = Date.now()
+    const r = await caKeySource(entry, { timeoutMs: 200 }).key()
+    expect(
+      r.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toContain("timed out")
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
+
+const hasOpenSsh = ["ssh-keygen", "ssh-agent", "ssh-add"].every(
+  (bin) => spawnSync(bin, ["-?"], { stdio: "ignore" }).error === undefined,
+)
+
+describe.skipIf(!hasOpenSsh)("selfTestCas (OpenSSH)", () => {
+  it("a CA whose certificate options ssh-keygen rejects fails at startup", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selftest-"))
+    try {
+      execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "", "-f", join(dir, "ca")])
+      const key = readFileSync(join(dir, "ca"), "utf8")
+      const custody = (
+        await startCaCustody(
+          join(dir, "run"),
+          [{ name: "home", key: async () => Right<string, string>(key) }],
+          nodeProcessRunner,
+        )
+      ).orThrow()
+      try {
+        const good: CaEntry = {
+          name: "home",
+          key: { kind: "env", name: "X" },
+          principal: "fleet",
+          sourceAddress: Option.none(),
+        }
+        expect((await selfTestCas(custody, [good], nodeProcessRunner)).isRight()).toBe(true)
+        // Bypasses config validation on purpose: ssh-keygen itself must be the backstop.
+        const bad: CaEntry = { ...good, sourceAddress: Option("100.64.0.1/24") }
+        const r = await selfTestCas(custody, [bad], nodeProcessRunner)
+        expect(
+          r.fold(
+            (e) => e,
+            () => "",
+          ),
+        ).toMatch(/^CA "home":/)
+        expect(spawnSync("ls", [join(dir, "run")], { encoding: "utf8" }).stdout).not.toMatch(/k-/)
+      } finally {
+        await custody.shutdown()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

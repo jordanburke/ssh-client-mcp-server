@@ -41,6 +41,7 @@ import {
   defaultKnownHosts,
   defaultRuntimeDir,
   type FleetRunner,
+  selfTestCas,
 } from "./runners.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
@@ -195,10 +196,19 @@ const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
   // Socket paths are fixed-length below runtimeDir, so one check covers every (agent, host).
   socketPathFor(runtimeDir, "unknown", "host").fold(fatal, () => undefined)
   mkdirSync(dirname(knownHosts), { recursive: true, mode: 0o700 })
-  const custody = (await startCaCustody(runtimeDir, fleet.cas.map(caKeySource), nodeProcessRunner)).fold(
-    fatal,
-    (c) => c,
-  )
+  const custody = (
+    await startCaCustody(
+      runtimeDir,
+      fleet.cas.map((c) => caKeySource(c)),
+      nodeProcessRunner,
+    )
+  ).fold(fatal, (c) => c)
+  // Mint and discard one certificate per CA: a CA that can't sign stops startup now, not every call.
+  const selfTest = await selfTestCas(custody, fleet.cas, nodeProcessRunner)
+  if (selfTest.isLeft()) {
+    await custody.shutdown()
+    fatal(selfTest.value)
+  }
   return Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts })
 }
 

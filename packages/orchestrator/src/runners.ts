@@ -67,7 +67,7 @@ const fromFile = async (path: string): Promise<Either<string, string>> => {
   return Right<string, string>(await readFile(file, "utf8"))
 }
 
-const readCaKey = async (ref: CaKeyRef): Promise<Either<string, string>> => {
+const readCaKey = async (ref: CaKeyRef, timeoutMs: number): Promise<Either<string, string>> => {
   switch (ref.kind) {
     case "cmd": {
       // A secrets-manager CLI may need its own environment (a service token, a keychain session),
@@ -76,7 +76,7 @@ const readCaKey = async (ref: CaKeyRef): Promise<Either<string, string>> => {
         Object.entries(process.env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]])),
       ) as Readonly<Record<string, string>>
       const r = await nodeProcessRunner
-        .run("sh", ["-c", ref.cmd], { env })
+        .run("sh", ["-c", ref.cmd], { env, timeoutMs })
         .catch((e: unknown) => ({ code: -1, stdout: "", stderr: (e as Error).message }))
       return r.code === 0 && r.stdout.trim().length > 0
         ? Right<string, string>(`${r.stdout.trim()}\n`)
@@ -93,7 +93,35 @@ const readCaKey = async (ref: CaKeyRef): Promise<Either<string, string>> => {
   }
 }
 
-export const caKeySource = (entry: CaEntry): CaKeySource => ({ name: entry.name, key: () => readCaKey(entry.key) })
+// key_cmd gets 30 s and no terminal: a command that would prompt fails instead of blocking startup.
+export const KEY_CMD_TIMEOUT_MS = 30_000
+
+// Options are an object, not a positional number, so `cas.map(caKeySource)` can't pass an index as a timeout.
+export const caKeySource = (entry: CaEntry, opts: Readonly<{ timeoutMs?: number }> = {}): CaKeySource => ({
+  name: entry.name,
+  key: () => readCaKey(entry.key, opts.timeoutMs ?? KEY_CMD_TIMEOUT_MS),
+})
+
+// Mints and discards one certificate per CA, so a CA the agent can't sign with, or a certificate
+// option ssh-keygen rejects, stops startup instead of failing every later call.
+export const selfTestCas = async (
+  custody: Custody,
+  cas: ReadonlyArray<CaEntry>,
+  proc: ProcessRunner,
+): Promise<Either<string, void>> => {
+  const tested = await Either.traverseAsync(cas, async (ca) => {
+    const minted = await mint(
+      custody,
+      { ca: ca.name, agent: "self-test", principal: ca.principal, sourceAddress: ca.sourceAddress },
+      proc,
+    )
+    return minted.fold(
+      (msg) => Promise.resolve(Left<string, void>(msg)),
+      (m) => m.dispose().then(() => Right<string, void>(undefined)),
+    )
+  })
+  return tested.map(() => undefined)
+}
 
 const sshConfigFor = (h: HostEntry): ConnectConfig => ({
   host: h.host,
