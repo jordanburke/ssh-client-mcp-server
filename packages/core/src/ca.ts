@@ -226,8 +226,9 @@ export const mint = async (
 
   const keyPath = join(custody.runtimeDir, `k-${randomBytes(8).toString("hex")}`)
   const certPath = `${keyPath}-cert.pub`
+  const files = [keyPath, `${keyPath}.pub`, certPath]
   const dispose = (): Promise<void> => {
-    ;[keyPath, `${keyPath}.pub`, certPath].forEach((f) => Try(() => unlinkSync(f)))
+    files.forEach((f) => Try(() => unlinkSync(f)))
     return Promise.resolve()
   }
 
