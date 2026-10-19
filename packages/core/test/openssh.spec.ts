@@ -2,6 +2,7 @@ import { Left, Right } from "functype"
 import { describe, expect, it, vi } from "vitest"
 
 import { type Minted } from "../src/ca.js"
+import { createPool } from "../src/pool.js"
 import { type OpensshDeps, opensshConnect } from "../src/openssh.js"
 import { type Child, type Env, type ProcessRunner, type ProcResult } from "../src/proc.js"
 
@@ -209,5 +210,125 @@ describe("opensshConnect", () => {
     spawns[1].fake.fire(255)
     await pending
     expect(done.yes).toBe(true)
+  })
+})
+
+// Timers the test fires by hand: retirement and drain run when the test says so.
+const manualTimers = () => {
+  const pending: Array<{ cb: () => void; ms: number; cancelled: boolean }> = []
+  return {
+    setTimer: (cb: () => void, ms: number) => {
+      const t = { cb, ms, cancelled: false }
+      pending.push(t)
+      return t
+    },
+    clearTimer: (t: unknown) => {
+      ;(t as { cancelled: boolean }).cancelled = true
+    },
+    fire: (ms: number) =>
+      pending
+        .filter((t) => t.ms === ms && !t.cancelled)
+        .forEach((t) => {
+          t.cancelled = true
+          t.cb()
+        }),
+  }
+}
+
+const RETIRE = 600_000
+const DRAIN = 60_000
+
+describe("retirement", () => {
+  const controlOps = (runs: ReadonlyArray<Call>) =>
+    runs.filter((r) => r.args.includes("-O")).map((r) => r.args[r.args.indexOf("-O") + 1])
+
+  it("a master is retired when its certificate expires", async () => {
+    const { proc, runs, spawns } = fakeProc()
+    const timers = manualTimers()
+    const m = minted()
+    const conn = await opensshConnect(
+      depsFor(proc, m, { ...timers, retireAfterMs: RETIRE, drainTimeoutMs: DRAIN }),
+    ).connect(sshConfig)
+    const onClose = vi.fn()
+    conn.onClose(onClose)
+    timers.fire(RETIRE)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(controlOps(runs)).toContain("stop"))
+    spawns[0].fake.fire(255)
+    await vi.waitFor(() => expect(m.dispose).toHaveBeenCalledTimes(1))
+    expect(controlOps(runs)).not.toContain("exit")
+  })
+
+  it("retiring lets in-flight execs finish", async () => {
+    const release = { fn: (_: ProcResult) => undefined as void }
+    const { proc, runs, spawns } = fakeProc({
+      exec: () =>
+        new Promise<ProcResult>((resolve) => {
+          release.fn = resolve
+        }),
+    })
+    const timers = manualTimers()
+    const m = minted()
+    const conn = await opensshConnect(
+      depsFor(proc, m, { ...timers, retireAfterMs: RETIRE, drainTimeoutMs: DRAIN }),
+    ).connect(sshConfig)
+    const inFlight = conn.exec("sleep 5")
+    await vi.waitFor(() => expect(runs.some((r) => r.args.includes("sleep 5"))).toBe(true))
+    timers.fire(RETIRE)
+    await vi.waitFor(() => expect(controlOps(runs)).toContain("stop"))
+    expect(spawns[0].fake.state.killed).toBe(0)
+    release.fn({ code: 0, stdout: "done", stderr: "" })
+    await expect(inFlight).resolves.toEqual({ stdout: "done", stderr: "", code: 0 })
+    spawns[0].fake.fire(0)
+    await vi.waitFor(() => expect(m.dispose).toHaveBeenCalledTimes(1))
+  })
+
+  it("a master that ignores stop is killed after the drain timeout", async () => {
+    const { proc, runs, spawns } = fakeProc()
+    const timers = manualTimers()
+    const m = minted()
+    await opensshConnect(depsFor(proc, m, { ...timers, retireAfterMs: RETIRE, drainTimeoutMs: DRAIN })).connect(
+      sshConfig,
+    )
+    timers.fire(RETIRE)
+    await vi.waitFor(() => expect(controlOps(runs)).toContain("stop"))
+    await new Promise((r) => setTimeout(r, 10))
+    timers.fire(DRAIN)
+    await vi.waitFor(() => expect(spawns[0].fake.state.killed).toBeGreaterThan(0))
+    await vi.waitFor(() => expect(m.dispose).toHaveBeenCalledTimes(1))
+  })
+
+  it("a call after retirement mints a new master", async () => {
+    const { proc, spawns } = fakeProc()
+    const timers = manualTimers()
+    const mintFor = vi.fn(async () => Right<string, Minted>(minted()))
+    const openssh = opensshConnect({
+      ...depsFor(proc, minted(), { ...timers, retireAfterMs: RETIRE, drainTimeoutMs: DRAIN }),
+      mintFor,
+    })
+    const pool = createPool(
+      [{ name: "box-a", sshConfig }],
+      { maxPerHost: 2, idleTimeoutMs: 3_600_000, acquireTimeoutMs: 1000 },
+      openssh.connect,
+    )
+    await pool.run("box-a", "one")
+    // Retirement alone must drop the connection; the old master is still draining.
+    timers.fire(RETIRE)
+    await pool.run("box-a", "two")
+    expect(mintFor).toHaveBeenCalledTimes(2)
+    expect(spawns).toHaveLength(2)
+    await pool.shutdown()
+  })
+
+  it("close cancels retirement", async () => {
+    const { proc, runs } = fakeProc()
+    const timers = manualTimers()
+    const conn = await opensshConnect(
+      depsFor(proc, minted(), { ...timers, retireAfterMs: RETIRE, drainTimeoutMs: DRAIN }),
+    ).connect(sshConfig)
+    conn.close()
+    timers.fire(RETIRE)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(controlOps(runs)).not.toContain("stop")
   })
 })

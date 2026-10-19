@@ -78,9 +78,6 @@ const execArgs = (c: ConnectConfig, socketPath: string, command: string): Readon
   command,
 ]
 
-const exitOf = (child: Child, timeoutMs: number): Promise<void> =>
-  Promise.race([new Promise<void>((resolve) => child.onExit(() => resolve())), sleep(timeoutMs)])
-
 const once = (fn: () => Promise<void>): (() => Promise<void>) => {
   const state: { run: Promise<void> | undefined } = { run: undefined }
   return () => {
@@ -94,6 +91,22 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
   const { proc, socketPath, knownHosts } = deps
   const readyTimeoutMs = deps.readyTimeoutMs ?? 15_000
   const drainTimeoutMs = deps.drainTimeoutMs ?? 60_000
+  const setTimer = deps.setTimer ?? ((cb: () => void, ms: number): unknown => setTimeout(cb, ms))
+  const clearTimer = deps.clearTimer ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>))
+
+  // Resolves when the child exits, or after `timeoutMs` if it doesn't.
+  const exitOf = (child: Child, timeoutMs: number): Promise<void> =>
+    Promise.race([
+      new Promise<void>((resolve) => child.onExit(() => resolve())),
+      new Promise<void>((resolve) => setTimer(resolve, timeoutMs)),
+    ])
+
+  // Waits for the master to exit (in-flight sessions finish first), then makes sure it is gone.
+  const drain = (child: Child, dispose: () => Promise<void>): Promise<void> =>
+    exitOf(child, drainTimeoutMs).then(() => {
+      child.kill()
+      return dispose()
+    })
   const live = new globalThis.Set<Readonly<{ child: Child; close: () => void }>>()
 
   const control = (op: string, c: ConnectConfig) =>
@@ -128,7 +141,7 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
       throw new Error(ready.value)
     }
 
-    const state = { closing: false, closed: false }
+    const state = { closing: false, closed: false, retired: false }
     const closeCbs: Array<() => void> = []
     const fireClose = (): void => {
       if (state.closed) return
@@ -140,17 +153,28 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
       void dispose()
     })
 
+    // sshd checks a certificate only at authentication, so a master would outlive its certificate.
+    // At expiry: drop it from the pool, refuse new sessions (`-O stop`; the master exits once its
+    // in-flight sessions end), then make sure it is gone. The next call mints a fresh master.
+    const retire = (): void => {
+      if (state.closing || state.retired) return
+      state.retired = true
+      fireClose()
+      void control("stop", c)
+        .catch(() => undefined)
+        .then(() => drain(child, dispose))
+    }
+    const retireTimer = setTimer(retire, deps.retireAfterMs ?? Math.max(0, m.validUntil.getTime() - Date.now()))
+    child.onExit(() => clearTimer(retireTimer))
+
     const close = (): void => {
-      if (state.closing) return
+      clearTimer(retireTimer)
+      if (state.closing || state.retired) return
       state.closing = true
       // `-O exit` exits 255 once the master is gone; that is success here, not an error.
       void control("exit", c)
         .catch(() => undefined)
-        .then(() => exitOf(child, drainTimeoutMs))
-        .then(() => {
-          child.kill()
-          return dispose()
-        })
+        .then(() => drain(child, dispose))
     }
     const entry = { child, close }
     live.add(entry)
@@ -158,7 +182,7 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
 
     const conn: PooledConnection = {
       exec: async (command) => {
-        if (child.exited() || state.closing) throw new Error(`master for ${c.host} is gone`)
+        if (child.exited() || state.closing || state.retired) throw new Error(`master for ${c.host} is gone`)
         const r = await proc.run("ssh", execArgs(c, socketPath, command), { env: childEnv() })
         return { stdout: r.stdout, stderr: r.stderr, code: r.code }
       },
