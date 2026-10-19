@@ -303,7 +303,7 @@ The server loads the CA at startup with no interactive unlock, so it restarts un
 - **Linux:** a `0600` `key_file` owned by the hub user.
 - **Either:** `key_cmd` against a non-interactive secrets service (`op read …`, Bitwarden Secrets Manager, Infisical), or `key_env`.
 
-The key reaches `ssh-add` on stdin and is never written to disk.
+The key reaches `ssh-add` on stdin and is never written to disk. A `key_cmd` must finish within 30 seconds and runs without a terminal, so a command that would prompt fails startup, naming the CA, instead of hanging.
 
 ### What a certificate allows
 
@@ -313,7 +313,9 @@ The key reaches `ssh-add` on stdin and is never written to disk.
 - A master is retired when its certificate expires; calls in flight finish, and the next call gets a fresh certificate.
 - Host keys are trusted on first use, recorded in the hub's own `known_hosts`.
 - `~/.ssh/config` is **ignored** (`-F /dev/null`), so nothing in it can add an identity. `ProxyJump` isn't supported yet.
-- After a crash, the next start kills the old agent and clears stale sockets and keys from `runtime_dir`.
+- At startup the server mints and discards one certificate per CA, so a CA it can't sign with, or a certificate option `ssh-keygen` rejects, stops startup instead of failing every call.
+- A master to a host that stops answering drops within about 45 seconds (SSH keepalives).
+- After a crash, the next start kills the old agent and any masters it left running, and clears stale sockets and keys from `runtime_dir`.
 
 ### Revoking access
 
