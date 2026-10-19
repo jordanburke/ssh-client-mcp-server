@@ -41,6 +41,9 @@ Shared logic consumed by both servers. Not published; bundled by tsdown into eac
 - **`tmux.ts`** — Pure tmux command builders and result interpreters: `tmuxList`, `tmuxSend`, `tmuxRead`, `tmuxKeys`. All accept a `TmuxRunner` (a thin `(cmd: string) => Promise<CommandResult>` function). Also exports `validateSession` and `validateKey` for session-name and key validation.
 - **`auth.ts`** — `resolveAuth(opts)` resolves the four auth modes (key file, key env var, ssh-agent, password env) into an `ssh2` `ConnectConfig` fragment.
 - **`ssh.ts`** — Low-level SSH exec over an `ssh2` connection.
+- **`proc.ts`** — `ProcessRunner` seam over `child_process` (`run` to completion, `spawn` a long-lived child) and `childEnv`, the allowlisted environment every OpenSSH child gets.
+- **`ca.ts`** — CA custody for `ca` auth: `startCaCustody` (private `ssh-agent`, keys loaded on stdin, crash recovery), `mint` (10-minute certificates via `ssh-keygen -U -s`), `socketPathFor`, `checkOpenSsh`.
+- **`openssh.ts`** — `opensshConnect`, a second `ConnectFactory`: an `ssh` ControlMaster per (agent, host), exec over its socket with no fallback path, retirement at certificate expiry.
 
 ### `ssh-client-mcp-server` (`packages/connector`)
 

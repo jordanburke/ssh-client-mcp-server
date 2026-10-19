@@ -11,6 +11,11 @@ idle_timeout_ms = 60000
 # mode = "readwrite"
 # tmux = "approve"          # recommended once approval ships; until then it denies tmux input
 
+# [[cas]]
+# name = "home"
+# key_cmd = "security find-generic-password -s ssh-fleet-ca -w"   # or key_env / key_file
+# principal = "fleet"
+
 # [audit]
 # path = "~/.local/state/ssh-fleet/audit.jsonl"   # the default
 
@@ -33,3 +38,9 @@ log_output = true   # add an excerpt of exec output to the audit log
 name = "box-c"
 host = "192.168.1.50"
 password_env = "BOXC_SSH_PASSWORD"   # value read from the env var, never inline
+
+# [[hosts]]                # a host that trusts the "home" CA (uncomment [[cas]] above too)
+# name = "box-d"
+# host = "10.0.0.14"
+# user = "fleet-ro"
+# ca = "home"
