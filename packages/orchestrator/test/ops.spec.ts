@@ -9,13 +9,17 @@ import { type FleetRunner } from "../src/runners.js"
 
 const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code: 0 }) => {
   const calls: Array<{ host: string; command: string }> = []
+  const agents: string[] = []
   const runner: FleetRunner = {
     hostNames: ["box-a", "box-b"],
     sessionFor: () => "agent",
     logOutputFor: () => false,
     policyFor: () => Option.none<HostPolicy>(),
     tmuxRunnerFor: (host) => Right((command: string) => run(host, command)),
-    exec: (host, command) => run(host, command),
+    exec: (host, command, agent) => {
+      agents.push(agent)
+      return run(host, command)
+    },
     status: () => [
       { name: "box-a", state: "idle", inFlight: 0 },
       { name: "box-b", state: "disconnected", inFlight: 0 },
@@ -26,7 +30,7 @@ const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code
     calls.push({ host, command })
     return result
   }
-  return { runner, calls }
+  return { runner, calls, agents }
 }
 
 const withAudit = (runner: FleetRunner, newId: () => string = () => "id-1") => {
@@ -42,6 +46,13 @@ describe("orchestrator handlers", () => {
     const out = JSON.parse(await h.hostsList())
     expect(out).toHaveLength(2)
     expect(out[0]).toMatchObject({ name: "box-a", state: "idle" })
+  })
+
+  it("exec passes the agent to the runner", async () => {
+    const { runner, agents } = recording()
+    const { h } = withAudit(runner)
+    await h.exec({ host: "box-a", command: "ls" })
+    expect(agents).toEqual(["unknown"])
   })
 
   it("exec routes the command to the named host", async () => {

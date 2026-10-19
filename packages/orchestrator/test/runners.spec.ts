@@ -1,8 +1,22 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest"
-import { type ConnectFactory, type PooledConnection } from "@ssh-mcp/core"
+import { execFileSync, spawnSync } from "node:child_process"
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
-import { parseFleet } from "../src/fleet.js"
-import { buildFleetRunner } from "../src/runners.js"
+import { Option, Right } from "functype"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
+import {
+  type ConnectFactory,
+  type Custody,
+  nodeProcessRunner,
+  type Openssh,
+  type PooledConnection,
+  socketPathFor,
+  startCaCustody,
+} from "@ssh-mcp/core"
+
+import { type CaEntry, type Fleet, parseFleet } from "../src/fleet.js"
+import { buildFleetRunner, type CaWiring, caKeySource, selfTestCas } from "../src/runners.js"
 
 const fakeConn: PooledConnection = {
   exec: async (command) => ({ stdout: `out:${command}`, stderr: "", code: 0 }),
@@ -115,5 +129,234 @@ key_env = "NOPE_KEY"
     if (f.isLeft()) throw new Error(f.value)
     const r = await buildFleetRunner(f.value, connect)
     expect(r.isLeft()).toBe(true)
+  })
+})
+
+const caFleetToml = `
+[[cas]]
+name = "home"
+key_env = "UNUSED_CA_KEY"
+
+[[hosts]]
+name = "box-a"
+host = "10.0.0.11"
+ca = "home"
+
+[[hosts]]
+name = "box-b"
+host = "10.0.0.12"
+agent = true
+`
+
+const caFleet = (): Fleet => parseFleet(caFleetToml).orThrow()
+
+// Fake custody and OpenSSH: records which (agent, host) pairs open, their sockets, and shutdown order.
+const caWiring = (order: string[] = []) => {
+  const opened: Array<{ agent: string; host: string; socket: string; connections: number }> = []
+  const custody: Custody = {
+    runtimeDir: "/run/fleet",
+    agentSock: "/run/fleet/agent.sock",
+    pubPath: () => Option("/run/fleet/ca-home.pub"),
+    shutdown: async () => {
+      order.push("custody")
+    },
+  }
+  const wiring: CaWiring = {
+    custody,
+    proc: nodeProcessRunner,
+    knownHosts: "/state/known_hosts",
+    openFor: (agent, host): Openssh => {
+      const record = {
+        agent,
+        host: host.name,
+        socket: socketPathFor("/run/fleet", agent, host.name).orElse(""),
+        connections: 0,
+      }
+      opened.push(record)
+      return {
+        connect: async () => {
+          record.connections++
+          return {
+            exec: async (command) => ({ stdout: `${agent}:${command}`, stderr: "", code: 0 }),
+            close: () => {
+              order.push("pool")
+            },
+            onClose: () => {},
+          }
+        },
+        shutdown: async () => {
+          order.push("masters")
+        },
+      }
+    },
+  }
+  return { wiring, opened }
+}
+
+describe("CA routing", () => {
+  beforeAll(() => {
+    process.env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK ?? "/tmp/fake-agent.sock"
+  })
+
+  it("a ca host without custody fails to build", async () => {
+    const r = await buildFleetRunner(caFleet(), connect)
+    expect(
+      r.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toBe('host "box-a" uses ca auth but CA custody is not running')
+  })
+
+  it("two agents get separate pools and sockets on a CA host", async () => {
+    const { wiring, opened } = caWiring()
+    const runner = (await buildFleetRunner(caFleet(), connect, Option(wiring))).orThrow()
+    expect((await runner.exec("box-a", "x", "claude")).stdout).toBe("claude:x")
+    expect((await runner.exec("box-a", "x", "codex")).stdout).toBe("codex:x")
+    await runner.exec("box-a", "y", "claude")
+    expect(opened.map((o) => [o.agent, o.host, o.connections])).toEqual([
+      ["claude", "box-a", 1],
+      ["codex", "box-a", 1],
+    ])
+    expect(opened[0].socket).not.toBe(opened[1].socket)
+    await runner.shutdown()
+  })
+
+  it("non-ca hosts ignore the agent", async () => {
+    const connections = { n: 0 }
+    const counting: ConnectFactory = async () => {
+      connections.n++
+      return fakeConn
+    }
+    const { wiring } = caWiring()
+    const runner = (await buildFleetRunner(caFleet(), counting, Option(wiring))).orThrow()
+    await runner.exec("box-b", "x", "claude")
+    await runner.exec("box-b", "x", "codex")
+    expect(connections.n).toBe(1)
+    await runner.shutdown()
+  })
+
+  it("ca hosts appear in hosts_list before first use", async () => {
+    const { wiring } = caWiring()
+    const runner = (await buildFleetRunner(caFleet(), connect, Option(wiring))).orThrow()
+    expect(runner.hostNames).toEqual(["box-a", "box-b"])
+    expect(runner.status()).toContainEqual({ name: "box-a", state: "disconnected", inFlight: 0 })
+    expect(runner.tmuxRunnerFor("box-a", "unknown").isRight()).toBe(true)
+    await runner.shutdown()
+  })
+
+  it("shutdown stops pools, then masters, then custody", async () => {
+    const order: string[] = []
+    const { wiring } = caWiring(order)
+    const runner = (await buildFleetRunner(caFleet(), connect, Option(wiring))).orThrow()
+    await runner.exec("box-a", "x", "claude")
+    await runner.shutdown()
+    expect(order).toEqual(["pool", "masters", "custody"])
+  })
+})
+
+describe("caKeySource", () => {
+  const entry = (key: CaEntry["key"]): CaEntry => ({
+    name: "home",
+    key,
+    principal: "fleet",
+    sourceAddress: Option.none(),
+  })
+
+  it("caKeySource reads and clears env, and refuses a world-readable file", async () => {
+    process.env.FLEET_TEST_CA = "KEY"
+    expect((await caKeySource(entry({ kind: "env", name: "FLEET_TEST_CA" })).key()).orElse("")).toBe("KEY")
+    expect(process.env.FLEET_TEST_CA).toBeUndefined()
+
+    const dir = mkdtempSync(join(tmpdir(), "cakey-"))
+    const file = join(dir, "ca")
+    writeFileSync(file, "KEY\n", { mode: 0o644 })
+    chmodSync(file, 0o644)
+    const loose = await caKeySource(entry({ kind: "file", path: file })).key()
+    expect(
+      loose.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toContain("0600")
+
+    chmodSync(file, 0o600)
+    expect((await caKeySource(entry({ kind: "file", path: file })).key()).orElse("")).toBe("KEY\n")
+
+    symlinkSync(file, join(dir, "link"))
+    const linked = await caKeySource(entry({ kind: "file", path: join(dir, "link") })).key()
+    expect(
+      linked.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toContain("symlink")
+
+    const cmd = await caKeySource(entry({ kind: "cmd", cmd: "printf KEY" })).key()
+    expect(cmd.orElse("")).toBe("KEY\n")
+  })
+})
+
+describe("key_cmd timeout", () => {
+  it("a key_cmd that hangs fails instead of blocking startup", async () => {
+    const entry: CaEntry = {
+      name: "home",
+      key: { kind: "cmd", cmd: "sleep 5" },
+      principal: "fleet",
+      sourceAddress: Option.none(),
+    }
+    const started = Date.now()
+    const r = await caKeySource(entry, { timeoutMs: 200 }).key()
+    expect(
+      r.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toContain("timed out")
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
+
+const hasOpenSsh = ["ssh-keygen", "ssh-agent", "ssh-add"].every(
+  (bin) => spawnSync(bin, ["-?"], { stdio: "ignore" }).error === undefined,
+)
+
+describe.skipIf(!hasOpenSsh)("selfTestCas (OpenSSH)", () => {
+  it("a CA whose certificate options ssh-keygen rejects fails at startup", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "selftest-"))
+    try {
+      execFileSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "", "-f", join(dir, "ca")])
+      const key = readFileSync(join(dir, "ca"), "utf8")
+      const custody = (
+        await startCaCustody(
+          join(dir, "run"),
+          [{ name: "home", key: async () => Right<string, string>(key) }],
+          nodeProcessRunner,
+        )
+      ).orThrow()
+      try {
+        const good: CaEntry = {
+          name: "home",
+          key: { kind: "env", name: "X" },
+          principal: "fleet",
+          sourceAddress: Option.none(),
+        }
+        expect((await selfTestCas(custody, [good], nodeProcessRunner)).isRight()).toBe(true)
+        // Bypasses config validation on purpose: ssh-keygen itself must be the backstop.
+        const bad: CaEntry = { ...good, sourceAddress: Option("100.64.0.1/24") }
+        const r = await selfTestCas(custody, [bad], nodeProcessRunner)
+        expect(
+          r.fold(
+            (e) => e,
+            () => "",
+          ),
+        ).toMatch(/^CA "home":/)
+        expect(spawnSync("ls", [join(dir, "run")], { encoding: "utf8" }).stdout).not.toMatch(/k-/)
+      } finally {
+        await custody.shutdown()
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

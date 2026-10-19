@@ -17,6 +17,7 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) and the shared `@ssh
 - [Tools](#tools)
 - [Policy](#policy)
 - [Audit Log](#audit-log)
+- [CA Mode](#ca-mode)
 - [Client Setup](#client-setup)
 - [Development](#development)
 
@@ -105,12 +106,13 @@ Each `[[hosts]]` entry defines a remote machine. Host names must be unique and m
 
 Each host must specify exactly one authentication method:
 
-| Mode         | Field          | How it works                                                             |
-| ------------ | -------------- | ------------------------------------------------------------------------ |
-| Key file     | `key`          | Path to a PEM private key; `~` and `$VAR` are expanded at startup.       |
-| Key from env | `key_env`      | Name of an env var holding the PEM (injected by envpkt, Vault, Doppler). |
-| SSH agent    | `agent = true` | Delegates to `SSH_AUTH_SOCK` — the server never sees the private key.    |
-| Password env | `password_env` | Name of an env var holding the password; read once at startup.           |
+| Mode         | Field          | How it works                                                                             |
+| ------------ | -------------- | ---------------------------------------------------------------------------------------- |
+| Key file     | `key`          | Path to a PEM private key; `~` and `$VAR` are expanded at startup.                       |
+| Key from env | `key_env`      | Name of an env var holding the PEM (injected by envpkt, Vault, Doppler).                 |
+| SSH agent    | `agent = true` | Delegates to `SSH_AUTH_SOCK` — the server never sees the private key.                    |
+| Password env | `password_env` | Name of an env var holding the password; read once at startup.                           |
+| CA           | `ca`           | Names a `[[cas]]` entry; connects with a 10-minute certificate. See [CA Mode](#ca-mode). |
 
 ## Secrets-by-Reference Rule
 
@@ -250,6 +252,80 @@ What each tool records:
 - **No unaudited calls.** The server refuses to start if the log can't be written, and a call whose audit line can't be written fails.
 - **The file is reopened for every line,** so a deleted or rotated log is recreated at mode `0600`. A symlink at the audit path is refused rather than followed.
 - **Append-only is best effort** — the server's user can truncate its own file. For stronger integrity, set the OS append-only flag from an administrator account: `sudo chattr +a <file>` (Linux) or `sudo chflags uappend <file>` (macOS). Rotation is out of scope.
+
+## CA Mode
+
+With `ca = "<name>"`, a host trusts one SSH certificate authority instead of a per-host key. The server holds the CA in a private `ssh-agent`, signs a **10-minute certificate** for each connection, and connects with the system `ssh` binary (OpenSSH: `ssh`, `ssh-keygen`, `ssh-agent`, `ssh-add`). Agents never hold an SSH credential.
+
+```toml
+runtime_dir = "/run/ssh-fleet"                 # optional; sockets and ephemeral keys
+known_hosts = "~/.local/state/ssh-fleet/known_hosts"  # optional; the hub's own
+
+[[cas]]
+name = "home"
+key_cmd = "security find-generic-password -s ssh-fleet-ca -w"   # or key_env / key_file
+principal = "fleet"                  # default
+source_address = "100.64.0.1/32"     # optional: certificates only work from here
+
+[[hosts]]
+name = "box-a"
+host = "10.0.0.11"
+user = "fleet-ro"
+ca = "home"
+```
+
+| `[[cas]]` key    | Description                                                                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------- |
+| `name`           | Letters, digits, hyphen, underscore. Hosts refer to it with `ca = "<name>"`.                          |
+| `key_cmd`        | A shell command whose output is the CA private key (a keychain or password-manager read).             |
+| `key_env`        | An env var holding the CA private key; removed from the environment once read.                        |
+| `key_file`       | A key file: a regular file (not a symlink), mode `0600` or stricter, owned by the hub user.           |
+| `principal`      | The principal certificates name (default `"fleet"`). A host may override it with its own `principal`. |
+| `source_address` | An IPv4 or IPv6 CIDR; certificates are only accepted from those addresses.                            |
+
+Exactly one of `key_cmd`, `key_env` or `key_file`. Inline keys are rejected.
+
+### Enrolling a host
+
+Add one line to a **root-owned** authorized-keys file for the account the host entry logs in as:
+
+```
+cert-authority,principals="fleet" ssh-ed25519 AAAA… ssh-fleet-ca
+```
+
+Use `AuthorizedKeysFile /etc/ssh/authorized_keys/%u` in `sshd_config`, or `TrustedUserCAKeys` plus `AuthorizedPrincipalsFile`. A user-writable `~/.ssh/authorized_keys` defeats the point: any agent with write access could append its own key and bypass the hub for good. The principal is just a label the certificate must carry; what limits access is **which account's** file holds the CA line, and that account's rights.
+
+### The CA key at boot
+
+The server loads the CA at startup with no interactive unlock, so it restarts unattended. Keep the canonical copy in your password manager, and give the server a working copy only it can read:
+
+- **macOS:** `key_cmd` reading the hub user's keychain (`security find-generic-password -s ssh-fleet-ca -w`).
+- **Linux:** a `0600` `key_file` owned by the hub user.
+- **Either:** `key_cmd` against a non-interactive secrets service (`op read …`, Bitwarden Secrets Manager, Infisical), or `key_env`.
+
+The key reaches `ssh-add` on stdin and is never written to disk. A `key_cmd` must finish within 30 seconds and runs without a terminal, so a command that would prompt fails startup, naming the CA, instead of hanging.
+
+### What a certificate allows
+
+- **10 minutes,** key ID = the agent's name, the configured principal, and an increasing serial.
+- **No** port forwarding, agent forwarding, X11 forwarding or `~/.ssh/rc`; optional `source_address`.
+- Each (agent, host) pair gets its own master connection and its own certificate, so one agent never rides another's session, and the host's sshd log names the agent (`Accepted certificate ID "claude"`).
+- A master is retired when its certificate expires; calls in flight finish, and the next call gets a fresh certificate.
+- Host keys are trusted on first use, recorded in the hub's own `known_hosts`.
+- `~/.ssh/config` is **ignored** (`-F /dev/null`), so nothing in it can add an identity. `ProxyJump` isn't supported yet.
+- At startup the server mints and discards one certificate per CA, so a CA it can't sign with, or a certificate option `ssh-keygen` rejects, stops startup instead of failing every call.
+- A master to a host that stops answering drops within about 45 seconds (SSH keepalives).
+- After a crash, the next start kills the old agent and any masters it left running, and clears stale sockets and keys from `runtime_dir`.
+
+### Revoking access
+
+- **Stop the server:** no new certificates; outstanding ones expire within 10 minutes and their masters are retired.
+- **Cut access now:** remove the CA line from the host.
+- **Separate trust domains** (fleets run by different parties): use separate `[[cas]]` entries, so each can be revoked alone.
+
+### Enforcement
+
+CA mode governs access only if the server is the **only** path. Run it as its own OS user (a launchd or systemd service), so agent processes running as you can't read the CA key, the certificates or the audit log, and don't give your interactive user unrestricted `sudo`. Over stdio, as the same user as the agent, nothing is governed.
 
 ## Example Config
 
