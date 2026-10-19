@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { type CommandResult, tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "@ssh-mcp/core"
+import {
+  checkOpenSsh,
+  type CommandResult,
+  nodeProcessRunner,
+  socketPathFor,
+  startCaCustody,
+  tmuxKeys,
+  tmuxList,
+  tmuxRead,
+  tmuxSend,
+} from "@ssh-mcp/core"
 import { type Either, Option, Try } from "functype"
+import { Path } from "functype-os"
 import { createServer, UserError } from "somamcp"
 import { z } from "zod"
 
@@ -21,9 +32,16 @@ import {
   excerpt,
   openAuditLog,
 } from "./audit.js"
-import { fleetWarnings, parseFleet } from "./fleet.js"
+import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
 import { ALLOW, evaluate, type PolicyRequest, type Verdict } from "./policy.js"
-import { buildFleetRunner, type FleetRunner } from "./runners.js"
+import {
+  buildFleetRunner,
+  caKeySource,
+  type CaWiring,
+  defaultKnownHosts,
+  defaultRuntimeDir,
+  type FleetRunner,
+} from "./runners.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -86,7 +104,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
     exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
       const r = await auditor.audited(
         gated(host, { tool: "exec", agent: AGENT_UNKNOWN, command }, { command }),
-        () => runner.exec(host, command),
+        () => runner.exec(host, command, AGENT_UNKNOWN),
         summarizeExec(host),
       )
       if (r.stderr) throw new UserError(`[${host}] Error (code ${r.code}):\n${r.stderr}`)
@@ -95,7 +113,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
     tmuxList: ({ host }: { host: string }): Promise<string> =>
       auditor.audited(
         gated(host, { tool: "tmux_list", agent: AGENT_UNKNOWN }),
-        async () => JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host))))),
+        async () => JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN))))),
         noSummary,
       ),
     tmuxSend: ({
@@ -114,7 +132,13 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
       return auditor.audited(
         gated(host, { tool: "tmux_send", agent: AGENT_UNKNOWN }, { session: target, input, submit: press }),
         async () => {
-          unwrap(await tmuxSend(unwrap(runner.tmuxRunnerFor(host)), { session: target, input, submit: press }))
+          unwrap(
+            await tmuxSend(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), {
+              session: target,
+              input,
+              submit: press,
+            }),
+          )
           return `[${host}] sent to tmux session "${target}".`
         },
         noSummary,
@@ -125,7 +149,8 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
       const count = lines ?? 200
       return auditor.audited(
         gated(host, { tool: "tmux_read", agent: AGENT_UNKNOWN }, { session: target, lines: count }),
-        async () => unwrap(await tmuxRead(unwrap(runner.tmuxRunnerFor(host)), { session: target, lines: count })),
+        async () =>
+          unwrap(await tmuxRead(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), { session: target, lines: count })),
         (transcript) => ({ stdout_bytes: bytes(transcript) }),
       )
     },
@@ -134,7 +159,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
       return auditor.audited(
         gated(host, { tool: "tmux_keys", agent: AGENT_UNKNOWN }, { session: target, keys }),
         async () => {
-          unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host)), { session: target, keys }))
+          unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), { session: target, keys }))
           return `[${host}] sent keys [${keys.join(", ")}] to tmux session "${target}".`
         },
         noSummary,
@@ -147,6 +172,34 @@ const findConfigPath = (argv: ReadonlyArray<string>): string => {
   const flag = argv.find((a) => a.startsWith("--config="))
   if (flag) return flag.slice("--config=".length)
   return process.env.SSH_FLEET_CONFIG ?? join(homedir(), ".config", "ssh-fleet", "fleet.toml")
+}
+
+const fatal = (msg: string): never => {
+  console.error(msg)
+  return process.exit(1)
+}
+
+const expanded = (path: string): string =>
+  Path.expand(path).fold(
+    (e) => fatal(`invalid path ${path}: ${e.message}`),
+    (p) => p,
+  )
+
+// When any host uses ca auth: check OpenSSH, prepare the runtime dir and known_hosts, and load every
+// CA key into a private ssh-agent. Each failure stops startup.
+const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
+  if (!fleet.hosts.some((h) => h.ca.isSome())) return Option.none<CaWiring>()
+  ;(await checkOpenSsh(nodeProcessRunner)).fold(fatal, () => undefined)
+  const runtimeDir = fleet.runtimeDir.map(expanded).orElse(defaultRuntimeDir())
+  const knownHosts = fleet.knownHosts.map(expanded).orElse(defaultKnownHosts())
+  // Socket paths are fixed-length below runtimeDir, so one check covers every (agent, host).
+  socketPathFor(runtimeDir, "unknown", "host").fold(fatal, () => undefined)
+  mkdirSync(dirname(knownHosts), { recursive: true, mode: 0o700 })
+  const custody = (await startCaCustody(runtimeDir, fleet.cas.map(caKeySource), nodeProcessRunner)).fold(
+    fatal,
+    (c) => c,
+  )
+  return Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts })
 }
 
 async function main(): Promise<void> {
@@ -178,12 +231,20 @@ async function main(): Promise<void> {
     (s) => s,
   )
 
-  const runner = (await buildFleetRunner(fleet)).fold(
-    (msg) => {
+  const ca = await startCa(fleet)
+  const runner = await (
+    await buildFleetRunner(fleet, undefined, ca)
+  ).fold(
+    async (msg) => {
       console.error(msg)
-      process.exit(1)
+      // Never leave a CA agent holding the key behind a failed start.
+      await ca.fold(
+        () => Promise.resolve(),
+        (wiring) => wiring.custody.shutdown(),
+      )
+      return process.exit(1)
     },
-    (r) => r,
+    (r) => Promise.resolve(r),
   )
 
   const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID }))
