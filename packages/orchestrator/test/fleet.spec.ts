@@ -130,6 +130,99 @@ key = "/keys/id_b"
     ])
   })
 
+  const caBase = `[[cas]]
+name = "home"
+key_cmd = "op read x"
+`
+  const caHost = `
+[[hosts]]
+name = "box-a"
+host = "10.0.0.11"
+ca = "home"
+`
+  const leftOf = (toml: string): string =>
+    parseFleet(toml).fold(
+      (e) => e,
+      () => "",
+    )
+
+  it("reads [[cas]] with a default principal", () => {
+    const r = parseFleet(caBase + caHost)
+    if (r.isLeft()) throw new Error(r.value)
+    const ca = r.value.cas[0]
+    expect(ca).toMatchObject({ name: "home", key: { kind: "cmd", cmd: "op read x" }, principal: "fleet" })
+    expect(ca.sourceAddress.isNone()).toBe(true)
+  })
+
+  it("a host can use ca auth", () => {
+    const r = parseFleet(caBase + caHost)
+    expect(r.map((f) => f.hosts[0].ca.orElse("")).orElse("x")).toBe("home")
+  })
+
+  it("ca counts as an auth mode", () => {
+    expect(leftOf(caBase + caHost + "agent = true\n")).toContain('host "box-a": exactly one auth mode allowed, found 2')
+  })
+
+  it("the no-auth message lists ca", () => {
+    expect(leftOf(`[[hosts]]\nname = "box-a"\nhost = "10.0.0.11"\n`)).toContain("key/key_env/agent/password_env/ca")
+  })
+
+  it("rejects a ca with no key reference", () => {
+    expect(leftOf(`[[cas]]\nname = "home"\n` + caHost)).toContain(
+      'ca "home": exactly one of key_cmd, key_env, key_file is required',
+    )
+  })
+
+  it("rejects an inline ca key", () => {
+    expect(leftOf(`[[cas]]\nname = "home"\nkey = "-----BEGIN"\n` + caHost)).toContain(
+      'ca "home": keys must not be inline; use key_cmd, key_env or key_file',
+    )
+  })
+
+  it("rejects two key references", () => {
+    expect(leftOf(caBase + `key_env = "CA"\n` + caHost)).toContain(
+      'ca "home": exactly one of key_cmd, key_env, key_file is required',
+    )
+  })
+
+  it("rejects a principal with a comma", () => {
+    expect(leftOf(caBase + `principal = "a,b"\n` + caHost)).toContain(
+      'ca "home": principal must be non-empty with no commas',
+    )
+  })
+
+  it("rejects a malformed source_address", () => {
+    expect(leftOf(caBase + `source_address = "10.0.0.1"\n` + caHost)).toContain(
+      'ca "home": source_address must be an IPv4 or IPv6 CIDR',
+    )
+    expect(leftOf(caBase + `source_address = "10.0.0.1/33"\n` + caHost)).toContain(
+      'ca "home": source_address must be an IPv4 or IPv6 CIDR',
+    )
+    const ok = parseFleet(caBase + `source_address = "100.64.0.1/32"\n` + caHost)
+    expect(ok.map((f) => f.cas[0].sourceAddress.orElse("")).orElse("")).toBe("100.64.0.1/32")
+  })
+
+  it("rejects a host naming an undefined ca", () => {
+    expect(leftOf(caBase + caHost.replace('ca = "home"', 'ca = "nope"'))).toContain(
+      'host "box-a": ca "nope" is not defined in [[cas]]',
+    )
+  })
+
+  it("rejects principal on a non-ca host", () => {
+    expect(leftOf(`${base}principal = "fleet"\n`)).toContain('host "box-a": principal applies only to ca auth')
+  })
+
+  it("reads runtime_dir and known_hosts", () => {
+    const r = parseFleet(`runtime_dir = "/run/fleet"\nknown_hosts = "/var/lib/fleet/known_hosts"\n${base}`)
+    expect(r.map((f) => f.runtimeDir.orElse("")).orElse("")).toBe("/run/fleet")
+    expect(r.map((f) => f.knownHosts.orElse("")).orElse("")).toBe("/var/lib/fleet/known_hosts")
+    expect(
+      parseFleet(base)
+        .map((f) => f.runtimeDir.isNone())
+        .orElse(false),
+    ).toBe(true)
+  })
+
   it("reads pool settings with defaults", () => {
     const r = parseFleet(base)
     expect(r.isRight()).toBe(true)
