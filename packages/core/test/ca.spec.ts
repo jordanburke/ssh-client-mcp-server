@@ -3,10 +3,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { Left, Right } from "functype"
-import { afterEach, beforeAll, describe, expect, it } from "vitest"
+import { Left, Option, Right } from "functype"
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
-import { type CaKeySource, checkOpenSsh, type Custody, startCaCustody } from "../src/ca.js"
+import {
+  type CaKeySource,
+  checkOpenSsh,
+  type Custody,
+  mint,
+  nextSerial,
+  socketPathFor,
+  startCaCustody,
+} from "../src/ca.js"
 import { type Child, childEnv, nodeProcessRunner, type ProcessRunner } from "../src/proc.js"
 
 const OPENSSH = ["ssh", "ssh-keygen", "ssh-agent", "ssh-add"]
@@ -201,5 +209,89 @@ describe.skipIf(!hasOpenSsh)("CA custody (OpenSSH)", () => {
     await custody.shutdown()
     expect(existsSync(runtimeDir)).toBe(false)
     expect(agentKeys(custody.agentSock).status).not.toBe(0)
+  })
+})
+
+describe("nextSerial / socketPathFor", () => {
+  it("serials strictly increase", () => {
+    const ms = Date.now() + 10_000
+    const serials = Array.from({ length: 2000 }, () => nextSerial(ms))
+    expect(serials.every((v, i) => i === 0 || v > serials[i - 1])).toBe(true)
+    expect(nextSerial(ms + 1) > serials[serials.length - 1]).toBe(true)
+  })
+
+  it("rejects a runtime dir whose socket paths are too long", () => {
+    expect(socketPathFor("/" + "x".repeat(70), "unknown", "box-a").isLeft()).toBe(true)
+    const ok = socketPathFor("/run/fleet", "unknown", "box-a")
+    expect(ok.orElse("")).toMatch(/^\/run\/fleet\/m-[0-9a-f]{12}\.sock$/)
+    expect(socketPathFor("/run/fleet", "claude", "box-a").orElse("")).not.toBe(ok.orElse(""))
+  })
+})
+
+describe.skipIf(!hasOpenSsh)("minting (OpenSSH)", () => {
+  const ctx = { custody: undefined as Custody | undefined }
+  const request = { ca: "home", agent: "unknown", principal: "fleet", sourceAddress: Option.none<string>() }
+
+  beforeAll(async () => {
+    const dir = freshDir()
+    const key = keygen(dir, "ca")
+    ctx.custody = (await startCaCustody(join(dir, "run"), [source("home", key)], nodeProcessRunner)).orThrow()
+  })
+
+  afterAll(async () => {
+    await ctx.custody?.shutdown()
+  })
+
+  const custody = (): Custody => {
+    if (ctx.custody === undefined) throw new Error("custody not started")
+    return ctx.custody
+  }
+  const describeCert = (certPath: string): string =>
+    execFileSync("ssh-keygen", ["-L", "-f", certPath], { encoding: "utf8" })
+
+  it("mints a certificate with the agent, principal, validity and options", async () => {
+    const minted = (await mint(custody(), request, nodeProcessRunner)).orThrow()
+    const text = describeCert(minted.certPath)
+    expect(text).toContain('Key ID: "unknown"')
+    expect(text).toContain(`Serial: ${minted.serial}`)
+    const valid = /Valid: from (\S+) to (\S+)/.exec(text)
+    const span = valid ? new Date(valid[2]).getTime() - new Date(valid[1]).getTime() : 0
+    expect(span).toBe(15 * 60 * 1000)
+    expect(text).toMatch(/Principals:\s*\n\s+fleet\n/)
+    expect(text).toMatch(/Critical Options: \(none\)/)
+    const extensions = text
+      .slice(text.indexOf("Extensions:"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((l) => l.trim())
+    expect(extensions).toEqual(["permit-pty"])
+    await minted.dispose()
+  })
+
+  it("source_address becomes a critical option", async () => {
+    const minted = (
+      await mint(custody(), { ...request, sourceAddress: Option("100.64.0.1/32") }, nodeProcessRunner)
+    ).orThrow()
+    expect(describeCert(minted.certPath)).toContain("source-address 100.64.0.1/32")
+    await minted.dispose()
+  })
+
+  it("dispose deletes the key and certificate, twice safely", async () => {
+    const minted = (await mint(custody(), request, nodeProcessRunner)).orThrow()
+    await minted.dispose()
+    await minted.dispose()
+    expect(readdirSync(custody().runtimeDir).filter((f) => f.startsWith("k-"))).toEqual([])
+  })
+
+  it("signing with an unknown CA fails naming it", async () => {
+    const r = await mint(custody(), { ...request, ca: "nope" }, nodeProcessRunner)
+    expect(
+      r.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toMatch(/^CA "nope":/)
+    expect(readdirSync(custody().runtimeDir).filter((f) => f.startsWith("k-"))).toEqual([])
   })
 })

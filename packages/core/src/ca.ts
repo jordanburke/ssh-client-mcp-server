@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto"
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -155,5 +156,119 @@ export const startCaCustody = async (
       await stopAgent(agent)
       Try(() => rmSync(runtimeDir, { recursive: true, force: true }))
     },
+  })
+}
+
+export type MintRequest = Readonly<{ ca: string; agent: string; principal: string; sourceAddress: Option<string> }>
+
+// An ephemeral key and the certificate the CA signed for it. `dispose` deletes both and is safe to repeat.
+export type Minted = Readonly<{
+  keyPath: string
+  certPath: string
+  validUntil: Date
+  serial: string
+  dispose: () => Promise<void>
+}>
+
+const VALIDITY_MS = 10 * 60 * 1000
+
+// OpenSSH binds a control socket at `<path>.<16 random chars>` before renaming it, so the usable
+// length is the platform limit minus 17: 90 bytes on Linux (108), 86 on macOS (104).
+const MAX_SOCKET_PATH = 86
+
+export const socketPathFor = (runtimeDir: string, agent: string, host: string): Either<string, string> => {
+  const digest = createHash("sha256").update(`${agent}\0${host}`).digest("hex").slice(0, 12)
+  const path = join(runtimeDir, `m-${digest}.sock`)
+  return Buffer.byteLength(path) <= MAX_SOCKET_PATH
+    ? Right<string, string>(path)
+    : Left<string, string>(
+        `runtime_dir ${runtimeDir} is too long for control sockets (socket paths must be at most ${MAX_SOCKET_PATH} bytes)`,
+      )
+}
+
+// Strictly increasing without stored state: microseconds since the epoch, bumped past the last
+// serial when calls land in the same millisecond. Keeps a key revocation list possible later.
+const serials = { last: 0n }
+
+export const nextSerial = (nowMs: number): bigint => {
+  const candidate = BigInt(nowMs) * 1000n
+  serials.last = candidate > serials.last ? candidate : serials.last + 1n
+  return serials.last
+}
+
+const certOptions = (sourceAddress: Option<string>): ReadonlyArray<string> => [
+  "-O",
+  "no-port-forwarding",
+  "-O",
+  "no-agent-forwarding",
+  "-O",
+  "no-x11-forwarding",
+  "-O",
+  "no-user-rc",
+  ...sourceAddress.fold<string[]>(
+    () => [],
+    (cidr) => ["-O", `source-address=${cidr}`],
+  ),
+]
+
+// Generates an ephemeral ed25519 key in the runtime dir and has the CA, held in the private agent,
+// sign a ten-minute certificate for it naming the agent.
+export const mint = async (
+  custody: Custody,
+  req: MintRequest,
+  proc: ProcessRunner,
+  now: () => Date = () => new Date(),
+): Promise<Either<string, Minted>> => {
+  const fail = (step: string, detail: string) =>
+    Left<string, Minted>(`CA "${req.ca}": ${step} failed: ${detail.trim()}`)
+  const caPub = custody.pubPath(req.ca)
+  if (caPub.isNone()) return fail("signing", `no CA named "${req.ca}" in custody`)
+
+  const keyPath = join(custody.runtimeDir, `k-${randomBytes(8).toString("hex")}`)
+  const certPath = `${keyPath}-cert.pub`
+  const dispose = (): Promise<void> => {
+    ;[keyPath, `${keyPath}.pub`, certPath].forEach((f) => Try(() => unlinkSync(f)))
+    return Promise.resolve()
+  }
+
+  const gen = await proc.run("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "", "-f", keyPath], {
+    env: childEnv(),
+  })
+  if (gen.code !== 0) {
+    await dispose()
+    return fail("key generation", gen.stderr)
+  }
+
+  const at = now()
+  const serial = nextSerial(at.getTime())
+  const sign = await proc.run(
+    "ssh-keygen",
+    [
+      "-U",
+      "-s",
+      caPub.orElse(""),
+      "-I",
+      req.agent,
+      "-n",
+      req.principal,
+      "-V",
+      "-5m:+10m",
+      "-z",
+      serial.toString(),
+      ...certOptions(req.sourceAddress),
+      `${keyPath}.pub`,
+    ],
+    { env: childEnv({ SSH_AUTH_SOCK: custody.agentSock }) },
+  )
+  if (sign.code !== 0) {
+    await dispose()
+    return fail("signing", sign.stderr)
+  }
+  return Right<string, Minted>({
+    keyPath,
+    certPath,
+    validUntil: new Date(at.getTime() + VALIDITY_MS),
+    serial: serial.toString(),
+    dispose,
   })
 }
