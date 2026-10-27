@@ -1,5 +1,15 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -33,6 +43,29 @@ const source = (name: string, key: string): CaKeySource => ({ name, key: async (
 
 const agentKeys = (sock: string) =>
   spawnSync("ssh-add", ["-l"], { env: { PATH: process.env.PATH ?? "", SSH_AUTH_SOCK: sock }, encoding: "utf8" })
+
+// A PID that no longer runs: stands in for the hub that crashed.
+const deadPid = (): number => spawnSync("true").pid ?? 0
+
+// An ssh on control socket `sock` that hangs waiting for a banner from its ProxyCommand.
+const hangingSsh = (sock: string) =>
+  spawn(
+    "ssh",
+    [
+      "-F",
+      "/dev/null",
+      "-S",
+      sock,
+      "-o",
+      "ControlMaster=no",
+      "-o",
+      "ProxyCommand=cat",
+      "-o",
+      "BatchMode=yes",
+      "nowhere",
+    ],
+    { stdio: "ignore" },
+  )
 
 const alive = (pid: number): boolean => {
   try {
@@ -196,6 +229,7 @@ describe.skipIf(!hasOpenSsh)("CA custody (OpenSSH)", () => {
     expect(first.isRight()).toBe(true)
     const firstPid = Number(readFileSync(join(runtimeDir, "agent.pid"), "utf8"))
     writeFileSync(join(runtimeDir, "m-0123456789ab.sock"), "")
+    writeFileSync(join(runtimeDir, "hub.lock"), String(deadPid()))
 
     const second = await start(runtimeDir, [source("home", keys.plain)])
     expect(second.isRight()).toBe(true)
@@ -207,23 +241,101 @@ describe.skipIf(!hasOpenSsh)("CA custody (OpenSSH)", () => {
     const runtimeDir = join(freshDir(), "run")
     mkdirSync(runtimeDir, { recursive: true })
     // An ssh that hangs waiting for a banner from its ProxyCommand: a stand-in for a master left by a crash.
-    const master = spawn("ssh", ["-F", "/dev/null", "-o", "ProxyCommand=cat", "-o", "BatchMode=yes", "nowhere"], {
-      stdio: "ignore",
-    })
+    const master = hangingSsh(join(runtimeDir, "m-0123456789ab-aaaa.sock"))
     const bystander = spawn("sleep", ["30"], { stdio: "ignore" })
+    // The operator's own ssh, whose PID a stale pid file now names.
+    const operatorSsh = hangingSsh(join(freshDir(), "theirs.sock"))
     try {
       writeFileSync(join(runtimeDir, "m-0123456789ab-aaaa.pid"), String(master.pid))
       writeFileSync(join(runtimeDir, "m-0123456789ab-bbbb.pid"), String(bystander.pid))
+      writeFileSync(join(runtimeDir, "m-0123456789ab-cccc.pid"), String(operatorSsh.pid))
       await new Promise((r) => setTimeout(r, 200))
       expect((await start(runtimeDir, [source("home", keys.plain)])).isRight()).toBe(true)
       await new Promise((r) => setTimeout(r, 200))
       expect(alive(master.pid ?? 0)).toBe(false)
       expect(alive(bystander.pid ?? 0)).toBe(true)
+      expect(alive(operatorSsh.pid ?? 0)).toBe(true)
       expect(readdirSync(runtimeDir).filter((f) => f.endsWith(".pid") && f.startsWith("m-"))).toEqual([])
     } finally {
       master.kill()
       bystander.kill()
+      operatorSsh.kill()
     }
+  })
+
+  it("startup leaves an unrelated ssh-agent alone", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    mkdirSync(runtimeDir, { recursive: true })
+    const theirs = spawn("ssh-agent", ["-D", "-a", join(freshDir(), "theirs.sock")], { stdio: "ignore" })
+    try {
+      writeFileSync(join(runtimeDir, "agent.pid"), String(theirs.pid))
+      await new Promise((r) => setTimeout(r, 200))
+      expect((await start(runtimeDir, [source("home", keys.plain)])).isRight()).toBe(true)
+      expect(alive(theirs.pid ?? 0)).toBe(true)
+    } finally {
+      theirs.kill()
+    }
+  })
+
+  it("recovery still finds a stale agent when ps prints the full program path (macOS)", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    const first = await startCaCustody(runtimeDir, [source("home", keys.plain)], nodeProcessRunner)
+    expect(first.isRight()).toBe(true)
+    const firstPid = Number(readFileSync(join(runtimeDir, "agent.pid"), "utf8"))
+    writeFileSync(join(runtimeDir, "hub.lock"), String(deadPid()))
+    const macPs: ProcessRunner = {
+      ...nodeProcessRunner,
+      run: async (cmd, args, opts) => {
+        const r = await nodeProcessRunner.run(cmd, args, opts)
+        return cmd === "ps" ? { ...r, stdout: r.stdout.replace(/^\s*(?!\/)/, "/usr/bin/") } : r
+      },
+    }
+    const second = await startCaCustody(runtimeDir, [source("home", keys.plain)], macPs)
+    second.fold(
+      () => undefined,
+      (c) => {
+        opened.push(c)
+      },
+    )
+    expect(second.isRight()).toBe(true)
+    expect(alive(firstPid)).toBe(false)
+  })
+
+  it("a second hub on the same runtime dir is refused and the first keeps working", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    const first = (await start(runtimeDir, [source("home", keys.plain)])).orThrow()
+    const second = await start(runtimeDir, [source("home", keys.plain)])
+    expect(
+      second.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toMatch(/in use by pid \d+/)
+    expect(agentKeys(first.agentSock).status).toBe(0)
+  })
+
+  it("a runtime dir holding files the hub did not create is refused and left untouched", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    mkdirSync(runtimeDir, { mode: 0o755 })
+    chmodSync(runtimeDir, 0o755)
+    writeFileSync(join(runtimeDir, "id_ed25519"), "theirs", { mode: 0o600 })
+    const r = await start(runtimeDir, [source("home", keys.plain)])
+    expect(
+      r.fold(
+        (e) => e,
+        () => "",
+      ),
+    ).toContain("id_ed25519")
+    expect(readFileSync(join(runtimeDir, "id_ed25519"), "utf8")).toBe("theirs")
+    expect(statSync(runtimeDir).mode & 0o777).toBe(0o755)
+  })
+
+  it("shutdown keeps files the hub did not create", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    const custody = (await startCaCustody(runtimeDir, [source("home", keys.plain)], nodeProcessRunner)).orThrow()
+    writeFileSync(join(runtimeDir, "notes.txt"), "keep me")
+    await custody.shutdown()
+    expect(readdirSync(runtimeDir)).toEqual(["notes.txt"])
   })
 
   it("shutdown removes the runtime dir and stops the agent", async () => {

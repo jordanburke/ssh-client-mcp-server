@@ -285,6 +285,8 @@ ca = "home"
 
 Exactly one of `key_cmd`, `key_env` or `key_file`. Inline keys are rejected.
 
+`runtime_dir` (default `$XDG_RUNTIME_DIR/ssh-fleet`, else `~/.local/state/ssh-fleet/run`) must be a directory of its own: startup refuses one that holds files the server didn't create, and shutdown deletes only the server's own files. One server per `runtime_dir`: a second server started on the same one (say Claude Desktop and Claude Code with the same fleet config) fails startup with `runtime_dir … is in use by pid N` and leaves the first running. Give each its own config with its own `runtime_dir`.
+
 ### Enrolling a host
 
 Add one line to a **root-owned** authorized-keys file for the account the host entry logs in as:
@@ -315,7 +317,7 @@ The key reaches `ssh-add` on stdin and is never written to disk. A `key_cmd` mus
 - `~/.ssh/config` is **ignored** (`-F /dev/null`), so nothing in it can add an identity. `ProxyJump` isn't supported yet.
 - At startup the server mints and discards one certificate per CA, so a CA it can't sign with, or a certificate option `ssh-keygen` rejects, stops startup instead of failing every call.
 - A master to a host that stops answering drops within about 45 seconds (SSH keepalives).
-- After a crash, the next start kills the old agent and any masters it left running, and clears stale sockets and keys from `runtime_dir`.
+- After a crash, the next start stops the old agent and any masters it left running, and clears stale sockets and keys from `runtime_dir`. It stops a process only if `ps` shows it is `ssh-agent` or `ssh` on a socket in that `runtime_dir`, so a reused process ID never takes down anything else.
 
 ### Revoking access
 

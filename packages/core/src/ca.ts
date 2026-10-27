@@ -1,6 +1,15 @@
 import { createHash, randomBytes } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs"
+import { basename, join } from "node:path"
 
 import type { Option } from "functype"
 import { Either, Left, Map, Right, Try } from "functype"
@@ -65,15 +74,27 @@ const isStale = (f: string): boolean =>
   f.startsWith("k-") ||
   /^ca-.*\.pub$/.test(f)
 
+// Holds the PID of the hub using the runtime dir, so a second hub can't mistake it for a crash.
+const LOCK = "hub.lock"
+
+// Every file a hub creates in its runtime dir; anything else there belongs to someone else.
+const isOwn = (f: string): boolean => f === LOCK || isStale(f)
+
 const readPid = (path: string): number => Try(() => Number(readFileSync(path, "utf8").trim())).orElse(Number.NaN)
 
-// Kills `pid` only if it is alive and `ps` names it `comm` — a reused PID could be anything.
-const killIfStill = async (pid: number, comm: string, proc: ProcessRunner): Promise<void> => {
-  if (!Number.isInteger(pid) || pid <= 0 || !alive(pid)) return
+const isLive = (pid: number): boolean => Number.isInteger(pid) && pid > 0 && alive(pid)
+
+// Kills `pid` only if `ps` shows `program` running on `sock`, a path inside this hub's runtime dir.
+// A reused PID, or the operator's own ssh or ssh-agent, can't match. `args` rather than `comm`:
+// macOS prints `comm` as a full path, and OpenSSH may retitle a master `ssh: <sock> [mux]`.
+const killIfOurs = async (pid: number, program: string, sock: string, proc: ProcessRunner): Promise<void> => {
+  if (!isLive(pid)) return
   const ps = await proc
-    .run("ps", ["-p", String(pid), "-o", "comm="], { env: childEnv() })
+    .run("ps", ["-ww", "-p", String(pid), "-o", "args="], { env: childEnv() })
     .catch(() => ({ code: 1, stdout: "", stderr: "" }))
-  if (ps.code !== 0 || ps.stdout.trim() !== comm) return
+  const args = ps.stdout.trim()
+  const argv0 = basename(args.split(" ")[0] ?? "").replace(/:$/, "")
+  if (ps.code !== 0 || argv0 !== program || !args.includes(sock)) return
   Try(() => process.kill(pid, "SIGTERM"))
   await waitFor(() => !alive(pid), Date.now() + 2000)
 }
@@ -82,12 +103,59 @@ const killIfStill = async (pid: number, comm: string, proc: ProcessRunner): Prom
 // (holding authenticated sessions to fleet hosts), and its sockets behind; ssh-agent refuses an
 // existing socket path. Kill what is still ours, then clear the files.
 const recover = async (dir: string, proc: ProcessRunner): Promise<void> => {
-  await killIfStill(readPid(join(dir, "agent.pid")), "ssh-agent", proc)
+  await killIfOurs(readPid(join(dir, "agent.pid")), "ssh-agent", join(dir, "agent.sock"), proc)
   const masterPids = readdirSync(dir).filter((f) => /^m-.*\.pid$/.test(f))
-  await Promise.all(masterPids.map((f) => killIfStill(readPid(join(dir, f)), "ssh", proc)))
+  await Promise.all(
+    masterPids.map((f) => killIfOurs(readPid(join(dir, f)), "ssh", join(dir, f.replace(/\.pid$/, ".sock")), proc)),
+  )
   readdirSync(dir)
     .filter(isStale)
     .forEach((f) => Try(() => unlinkSync(join(dir, f))))
+}
+
+// Creates the runtime dir, or takes over an existing one only if it holds nothing but hub files:
+// the hub chmods it and deletes its own files from it, so it must not be anyone else's directory.
+const prepare = (dir: string): Either<string, void> =>
+  Try(() => {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    return readdirSync(dir).filter((f) => !isOwn(f))
+  }).fold(
+    (e) => Left<string, void>(`runtime_dir ${dir}: ${e.message}`),
+    (foreign) =>
+      foreign.length > 0
+        ? Left<string, void>(
+            `runtime_dir ${dir} holds files the hub did not create (${foreign.slice(0, 3).join(", ")}); give runtime_dir a directory of its own`,
+          )
+        : Try(() => chmodSync(dir, 0o700)).fold(
+            (e) => Left<string, void>(`runtime_dir ${dir}: ${e.message}`),
+            () => Right<string, void>(undefined),
+          ),
+  )
+
+// One hub per runtime dir: a second would take the first's agent and masters for a crash's leftovers.
+const lock = (dir: string): Either<string, void> => {
+  const path = join(dir, LOCK)
+  const holder = readPid(path)
+  if (isLive(holder))
+    return Left<string, void>(
+      `runtime_dir ${dir} is in use by pid ${holder}; give each hub its own runtime_dir (delete ${path} if that process is not a hub)`,
+    )
+  return Try(() => {
+    Try(() => unlinkSync(path))
+    writeFileSync(path, String(process.pid), { mode: 0o600, flag: "wx" })
+  }).fold(
+    (e) => Left<string, void>(`runtime_dir ${dir}: can't take ${LOCK}: ${e.message}`),
+    () => Right<string, void>(undefined),
+  )
+}
+
+// Deletes the hub's own files, lock included, and the dir itself once nothing else is left in it.
+const release = (dir: string): void => {
+  Try(() => readdirSync(dir))
+    .orElse([])
+    .filter(isOwn)
+    .forEach((f) => Try(() => unlinkSync(join(dir, f))))
+  Try(() => rmdirSync(dir))
 }
 
 const VALID_CA_NAME = /^[\w-]+$/
@@ -136,8 +204,8 @@ export const startCaCustody = async (
   cas: ReadonlyArray<CaKeySource>,
   proc: ProcessRunner,
 ): Promise<Either<string, Custody>> => {
-  mkdirSync(runtimeDir, { recursive: true, mode: 0o700 })
-  chmodSync(runtimeDir, 0o700)
+  const ready = prepare(runtimeDir).flatMap(() => lock(runtimeDir))
+  if (ready.isLeft()) return Left<string, Custody>(ready.value)
   await recover(runtimeDir, proc)
 
   const agentSock = join(runtimeDir, "agent.sock")
@@ -145,6 +213,7 @@ export const startCaCustody = async (
   const up = await waitFor(() => existsSync(agentSock) || agent.exited(), Date.now() + 5000)
   if (!up || agent.exited()) {
     await stopAgent(agent)
+    release(runtimeDir)
     return Left<string, Custody>(`ssh-agent failed to start: ${agent.stderr().trim() || "timed out"}`)
   }
   const pid = agent.pid()
@@ -153,7 +222,7 @@ export const startCaCustody = async (
   const loaded = await Either.traverseAsync(cas, (ca) => loadCa(ca, runtimeDir, agentSock, proc))
   if (loaded.isLeft()) {
     await stopAgent(agent)
-    await recover(runtimeDir, proc)
+    release(runtimeDir)
     return Left<string, Custody>(loaded.value)
   }
   const pubs = Map.of(...loaded.value.map(([name, path]): [string, string] => [name, path]))
@@ -164,7 +233,7 @@ export const startCaCustody = async (
     pubPath: (ca) => pubs.get(ca),
     shutdown: async () => {
       await stopAgent(agent)
-      Try(() => rmSync(runtimeDir, { recursive: true, force: true }))
+      release(runtimeDir)
     },
   })
 }
