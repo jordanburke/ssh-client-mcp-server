@@ -8,9 +8,10 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { tmpdir, uptime } from "node:os"
 import { join } from "node:path"
 
 import { Left, Option, Right } from "functype"
@@ -312,6 +313,22 @@ describe.skipIf(!hasOpenSsh)("CA custody (OpenSSH)", () => {
       ),
     ).toMatch(/in use by pid \d+/)
     expect(agentKeys(first.agentSock).status).toBe(0)
+  })
+
+  it("a lock from before the last boot doesn't block startup, even if its pid is reused", async () => {
+    const runtimeDir = join(freshDir(), "run")
+    mkdirSync(runtimeDir, { mode: 0o700 })
+    // After a reboot the dead hub's pid can belong to any live process; this one stands in for it.
+    const reused = spawn("sleep", ["30"], { stdio: "ignore" })
+    try {
+      const lockPath = join(runtimeDir, "hub.lock")
+      writeFileSync(lockPath, String(reused.pid))
+      const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000
+      utimesSync(lockPath, beforeBoot, beforeBoot)
+      expect((await start(runtimeDir, [source("home", keys.plain)])).isRight()).toBe(true)
+    } finally {
+      reused.kill()
+    }
   })
 
   it("a runtime dir holding files the hub did not create is refused and left untouched", async () => {

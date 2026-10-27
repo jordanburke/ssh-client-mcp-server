@@ -6,9 +6,11 @@ import {
   readdirSync,
   readFileSync,
   rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs"
+import { uptime } from "node:os"
 import { basename, join } from "node:path"
 
 import type { Option } from "functype"
@@ -132,11 +134,16 @@ const prepare = (dir: string): Either<string, void> =>
           ),
   )
 
+// A lock written before the last boot is stale whatever its pid: the runtime dir can outlive a reboot
+// (`~/.local/state` on macOS), and by then the old hub's pid may belong to any live process.
+const sinceBoot = (path: string): boolean =>
+  Try(() => statSync(path).mtimeMs >= Date.now() - uptime() * 1000).orElse(false)
+
 // One hub per runtime dir: a second would take the first's agent and masters for a crash's leftovers.
 const lock = (dir: string): Either<string, void> => {
   const path = join(dir, LOCK)
   const holder = readPid(path)
-  if (isLive(holder))
+  if (isLive(holder) && sinceBoot(path))
     return Left<string, void>(
       `runtime_dir ${dir} is in use by pid ${holder}; give each hub its own runtime_dir (delete ${path} if that process is not a hub)`,
     )
