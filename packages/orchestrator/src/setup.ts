@@ -54,6 +54,20 @@ export const ensureConfig = (config: ConfigPath): Either<string, Readonly<{ path
   )
 }
 
+// The expanded key_file path when the CA uses key_file and nothing is at that path (ENOENT only:
+// lstat, so a dangling symlink counts as present).
+export const missingKeyFile = async (ca: CaEntry): Promise<Either<string, Option<string>>> => {
+  if (ca.key.kind !== "file") return Right(Option.none<string>())
+  const expanded = Path.expand(ca.key.path)
+  if (expanded.isLeft()) return Left(`CA "${ca.name}": key_file ${ca.key.path}: ${expanded.value.message}`)
+  const path = expanded.value
+  const missing = await lstat(path).then(
+    () => false,
+    (e: unknown) => isCode(e, "ENOENT"),
+  )
+  return Right(missing ? Option(path) : Option.none<string>())
+}
+
 // Creates the key for each CA whose key_file is configured and missing (ENOENT only). Anything else at
 // that path, including a symlink or a file with the wrong mode, is left for the key_file checks at
 // custody start to report. key_cmd and key_env never create anything. Returns the created CAs' names.
@@ -62,15 +76,10 @@ export const ensureCaKeyFiles = async (
   proc: ProcessRunner,
 ): Promise<Either<string, ReadonlyArray<string>>> => {
   const created = await Either.traverseAsync(cas, async (ca): Promise<Either<string, ReadonlyArray<string>>> => {
-    if (ca.key.kind !== "file") return Right([])
-    const expanded = Path.expand(ca.key.path)
-    if (expanded.isLeft()) return Left(`CA "${ca.name}": key_file ${ca.key.path}: ${expanded.value.message}`)
-    const path = expanded.value
-    const missing = await lstat(path).then(
-      () => false,
-      (e: unknown) => isCode(e, "ENOENT"),
-    )
-    if (!missing) return Right([])
+    const missing = await missingKeyFile(ca)
+    if (missing.isLeft()) return Left(missing.value)
+    if (missing.value.isNone()) return Right([])
+    const path = missing.value.orElse("")
     const made = Try(() => mkdirSync(dirname(path), { recursive: true, mode: 0o700 }))
     if (made.isFailure()) return Left(`CA "${ca.name}": creating key_file ${path} failed: ${made.error.message}`)
     const r = await proc.run(
@@ -136,6 +145,12 @@ export type SetupReport = Readonly<{
 export const enrollLine = (principal: string, publicKey: string): string =>
   `cert-authority,principals="${principal}" ${publicKey.trim()}`
 
+export const hostAddress = (h: HostEntry): string =>
+  h.user.fold(
+    () => `${h.host}:${h.port}`,
+    (u) => `${u}@${h.host}:${h.port}`,
+  )
+
 const KEY_SOURCE = { cmd: "key_cmd", env: "key_env", file: "key_file" } as const
 
 // Built field by field: a HostEntry carries a resolved password in `auth`, so no whole entry, and no
@@ -153,10 +168,7 @@ const hostReport = (
     .flatMap((pub) => principal.map((p) => enrollLine(p, pub)))
   return {
     name: h.name,
-    address: h.user.fold(
-      () => `${h.host}:${h.port}`,
-      (u) => `${u}@${h.host}:${h.port}`,
-    ),
+    address: hostAddress(h),
     auth: h.authKind,
     ...h.passwordEnv.fold(
       () => ({}),
