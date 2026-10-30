@@ -1,11 +1,17 @@
-import { Left, Option, Right } from "functype"
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { Left, Map, Option, Right } from "functype"
 import { describe, expect, it } from "vitest"
 import { type CommandResult } from "@ssh-mcp/core"
 
 import { createAuditor } from "../src/audit.js"
 import { makeHandlers } from "../src/index.js"
 import { EMPTY_TABLE, type HostPolicy, parsePolicyTable, resolvePolicy } from "../src/policy.js"
+import { parseFleet } from "../src/fleet.js"
 import { type FleetRunner } from "../src/runners.js"
+import { type SetupContext } from "../src/setup.js"
 
 const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code: 0 }) => {
   const calls: Array<{ host: string; command: string }> = []
@@ -24,6 +30,7 @@ const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code
       { name: "box-a", state: "idle", inFlight: 0 },
       { name: "box-b", state: "disconnected", inFlight: 0 },
     ],
+    lastError: () => Option.none(),
     shutdown: async () => {},
   }
   const run = async (host: string, command: string): Promise<CommandResult> => {
@@ -33,10 +40,20 @@ const recording = (result: CommandResult = { stdout: "agent\n", stderr: "", code
   return { runner, calls, agents }
 }
 
-const withAudit = (runner: FleetRunner, newId: () => string = () => "id-1") => {
+const emptySetup = (configPath = "/cfg/fleet.toml"): SetupContext => ({
+  configPath,
+  configCreated: false,
+  fleet: parseFleet("").orThrow(),
+  caPublicKeys: Map.of<string, string>(),
+  caCreated: [],
+  runtimeDir: Option.none(),
+  knownHosts: Option.none(),
+})
+
+const withAudit = (runner: FleetRunner, newId: () => string = () => "id-1", setup: SetupContext = emptySetup()) => {
   const lines: string[] = []
   const auditor = createAuditor({ sink: (line) => lines.push(line), now: () => new Date(), newId })
-  return { h: makeHandlers(runner, auditor), lines, parsed: () => lines.map((l) => JSON.parse(l)) }
+  return { h: makeHandlers(runner, auditor, setup), lines, parsed: () => lines.map((l) => JSON.parse(l)) }
 }
 
 describe("orchestrator handlers", () => {
@@ -145,6 +162,37 @@ describe("audit", () => {
     expect(decision).toMatchObject({ event: "decision", tool: "hosts_list" })
     expect("host" in decision).toBe(false)
     expect(result).toMatchObject({ event: "result", status: "ok" })
+  })
+
+  it("fleet_setup is audited like hosts_list", async () => {
+    const { runner } = recording()
+    const { h, parsed } = withAudit(runner)
+    const out = JSON.parse(await h.fleetSetup())
+    expect(out.config.path).toBe("/cfg/fleet.toml")
+    const [decision, result] = parsed()
+    expect(decision).toMatchObject({ event: "decision", tool: "fleet_setup", decision: "allow" })
+    expect("host" in decision).toBe(false)
+    expect(result).toMatchObject({ event: "result", status: "ok" })
+  })
+
+  it("fleet_setup changes nothing on disk", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "fleet-setup-ops-"))
+    try {
+      const config = join(dir, "fleet.toml")
+      writeFileSync(config, "# mine\n", { mode: 0o600 })
+      const snapshot = () =>
+        readdirSync(dir).map((f) => {
+          const st = statSync(join(dir, f))
+          return [f, st.size, st.mtimeMs, st.mode]
+        })
+      const before = snapshot()
+      const { runner } = recording()
+      const { h } = withAudit(runner, undefined, emptySetup(config))
+      await h.fleetSetup()
+      expect(snapshot()).toEqual(before)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it("tmux_read logs the line count, not the transcript", async () => {

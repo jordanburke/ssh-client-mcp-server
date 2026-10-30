@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
@@ -18,7 +18,7 @@ import {
   tmuxRead,
   tmuxSend,
 } from "@ssh-mcp/core"
-import { type Either, Option, Try } from "functype"
+import { Either, Map, Option, Try } from "functype"
 import { Path } from "functype-os"
 import { createServer, UserError } from "somamcp"
 import { z } from "zod"
@@ -32,6 +32,7 @@ import {
   excerpt,
   openAuditLog,
 } from "./audit.js"
+import { checkRuntimeDir, readCheckConfig, runCheck } from "./check.js"
 import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
 import { ALLOW, evaluate, type PolicyRequest, type Verdict } from "./policy.js"
 import {
@@ -43,6 +44,14 @@ import {
   type FleetRunner,
   selfTestCas,
 } from "./runners.js"
+import {
+  ensureCaKeyFiles,
+  ensureConfig,
+  missingKeyFile,
+  resolveConfigPath,
+  type SetupContext,
+  setupReport,
+} from "./setup.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -63,7 +72,7 @@ const noSummary = (): AuditFields => ({})
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 // Every call is checked against its host's policy and goes through the auditor: a decision line
 // before it runs, a result line after. A denied call writes its decision line and never runs.
-export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
+export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
   const call = (tool: string, host: Option<string>, verdict: Verdict, fields: AuditFields = {}): AuditCall => ({
     agent: AGENT_UNKNOWN,
     tool,
@@ -99,6 +108,12 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
       auditor.audited(
         call("hosts_list", Option.none<string>(), ALLOW),
         () => Promise.resolve(JSON.stringify(runner.status())),
+        noSummary,
+      ),
+    fleetSetup: (): Promise<string> =>
+      auditor.audited(
+        call("fleet_setup", Option.none<string>(), ALLOW),
+        () => Promise.resolve(JSON.stringify(setupReport(setup, runner))),
         noSummary,
       ),
     /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
@@ -169,12 +184,6 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
   }
 }
 
-const findConfigPath = (argv: ReadonlyArray<string>): string => {
-  const flag = argv.find((a) => a.startsWith("--config="))
-  if (flag) return flag.slice("--config=".length)
-  return process.env.SSH_FLEET_CONFIG ?? join(homedir(), ".config", "ssh-fleet", "fleet.toml")
-}
-
 const fatal = (msg: string): never => {
   console.error(msg)
   return process.exit(1)
@@ -186,12 +195,25 @@ const expanded = (path: string): string =>
     (p) => p,
   )
 
-// When any host uses ca auth: check OpenSSH, prepare the runtime dir and known_hosts, and load every
-// CA key into a private ssh-agent. Each failure stops startup.
-const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
-  if (!fleet.hosts.some((h) => h.ca.isSome())) return Option.none<CaWiring>()
+type CaStart = Readonly<{ wiring: Option<CaWiring>; created: ReadonlyArray<string> }>
+
+// When any [[cas]] entry exists (with or without hosts using it yet): check OpenSSH, create any missing
+// key_file, prepare the runtime dir and known_hosts, and load every CA key into a private ssh-agent.
+// Each failure stops startup. `check` creates nothing and uses its own runtime dir.
+const startCa = async (fleet: Fleet, mode: "serve" | "check"): Promise<CaStart> => {
+  if (fleet.cas.length === 0) return { wiring: Option.none<CaWiring>(), created: [] }
   ;(await checkOpenSsh(nodeProcessRunner)).fold(fatal, () => undefined)
-  const runtimeDir = fleet.runtimeDir.map(expanded).orElse(defaultRuntimeDir())
+  const created =
+    mode === "serve" ? (await ensureCaKeyFiles(fleet.cas, nodeProcessRunner)).fold(fatal, (names) => names) : []
+  fleet.cas
+    .filter((c) => created.includes(c.name))
+    .forEach((c) =>
+      console.error(
+        `created CA "${c.name}" key at ${c.key.kind === "file" ? c.key.path : ""}; add its line to each host (see fleet_setup)`,
+      ),
+    )
+  const configured = fleet.runtimeDir.map(expanded).orElse(defaultRuntimeDir())
+  const runtimeDir = mode === "check" ? checkRuntimeDir(configured) : configured
   const knownHosts = fleet.knownHosts.map(expanded).orElse(defaultKnownHosts())
   // Socket paths are fixed-length below runtimeDir, so one check covers every (agent, host).
   socketPathFor(runtimeDir, "unknown", "host").fold(fatal, () => undefined)
@@ -209,11 +231,85 @@ const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
     await custody.shutdown()
     fatal(selfTest.value)
   }
-  return Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts })
+  return { wiring: Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts }), created }
+}
+
+// Never leave a CA agent holding the key behind a failed start.
+const buildRunnerOrExit = async (fleet: Fleet, ca: Option<CaWiring>): Promise<FleetRunner> =>
+  (await buildFleetRunner(fleet, undefined, ca)).fold(
+    async (msg) => {
+      console.error(msg)
+      await ca.fold(
+        () => Promise.resolve(),
+        (wiring) => wiring.custody.shutdown(),
+      )
+      return process.exit(1)
+    },
+    (r) => Promise.resolve(r),
+  )
+
+const caPublicKeysOf = (fleet: Fleet, ca: Option<CaWiring>): Map<string, string> =>
+  ca.fold(
+    () => Map.of<string, string>(),
+    (wiring) =>
+      Map.of(
+        ...fleet.cas.flatMap((c): Array<[string, string]> =>
+          wiring.custody
+            .pubPath(c.name)
+            .flatMap((path) => Try(() => readFileSync(path, "utf8")).toOption())
+            .fold(
+              () => [],
+              (pub) => [[c.name, pub.trim()]],
+            ),
+        ),
+      ),
+  )
+
+const parseOrExit = (raw: string): Fleet => {
+  const fleet = parseFleet(raw).fold(fatal, (f) => f)
+  fleetWarnings(fleet).forEach((w) => console.error(`warning: ${w}`))
+  return fleet
+}
+
+// `ssh-fleet-mcp-server check`: connect to every host from a terminal and print one line each.
+async function checkMain(): Promise<void> {
+  const { path } = resolveConfigPath(process.argv.slice(2), process.env, homedir())
+  const fleet = parseOrExit(readCheckConfig(path).fold(fatal, (raw) => raw))
+  const sink = openAuditLog(fleet.audit.path).fold(fatal, (s) => s)
+  const missing = await Either.traverseAsync(fleet.cas, async (c) =>
+    (await missingKeyFile(c)).map((m) =>
+      m.fold<string[]>(
+        () => [],
+        () => [c.name],
+      ),
+    ),
+  )
+  const missingKeyCas = missing.fold(fatal, (names) => names.flat())
+  // Probe only what can start: a CA with no key_file, and its hosts, are reported without a connection.
+  const probeFleet: Fleet = {
+    ...fleet,
+    cas: fleet.cas.filter((c) => !missingKeyCas.includes(c.name)),
+    hosts: fleet.hosts.filter((h) => !h.ca.exists((name) => missingKeyCas.includes(name))),
+  }
+  const { wiring: ca } = await startCa(probeFleet, "check")
+  const runner = await buildRunnerOrExit(probeFleet, ca)
+  const code = await runCheck({
+    fleet,
+    configPath: path,
+    runner,
+    auditor: createAuditor({ sink, now: () => new Date(), newId: randomUUID }),
+    missingKeyCas,
+    caPublicKeys: caPublicKeysOf(probeFleet, ca),
+    out: (line) => console.log(line),
+  })
+  await runner.shutdown()
+  process.exit(code)
 }
 
 async function main(): Promise<void> {
-  const configPath = findConfigPath(process.argv.slice(2))
+  const config = ensureConfig(resolveConfigPath(process.argv.slice(2), process.env, homedir())).fold(fatal, (c) => c)
+  if (config.created) console.error(`created fleet config at ${config.path}`)
+  const configPath = config.path
   const raw = Try(() => readFileSync(configPath, "utf8")).fold(
     (e) => {
       console.error(`Cannot read fleet config at ${configPath}: ${(e as Error).message}`)
@@ -222,15 +318,7 @@ async function main(): Promise<void> {
     (content) => content,
   )
 
-  const fleet = parseFleet(raw).fold(
-    (msg) => {
-      console.error(msg)
-      process.exit(1)
-    },
-    (f) => f,
-  )
-
-  fleetWarnings(fleet).forEach((w) => console.error(`warning: ${w}`))
+  const fleet = parseOrExit(raw)
 
   // Fail fast: no call may run unaudited, so an unwritable audit log stops startup.
   const sink = openAuditLog(fleet.audit.path).fold(
@@ -241,27 +329,26 @@ async function main(): Promise<void> {
     (s) => s,
   )
 
-  const ca = await startCa(fleet)
-  const runner = await (
-    await buildFleetRunner(fleet, undefined, ca)
-  ).fold(
-    async (msg) => {
-      console.error(msg)
-      // Never leave a CA agent holding the key behind a failed start.
-      await ca.fold(
-        () => Promise.resolve(),
-        (wiring) => wiring.custody.shutdown(),
-      )
-      return process.exit(1)
-    },
-    (r) => Promise.resolve(r),
-  )
+  const { wiring: ca, created: caCreated } = await startCa(fleet, "serve")
+  const runner = await buildRunnerOrExit(fleet, ca)
+  fleet.hosts.forEach((host) => runner.lastError(host.name).forEach((e) => console.error(`warning: ${e.message}`)))
 
-  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID }))
+  const setup: SetupContext = {
+    configPath,
+    configCreated: config.created,
+    fleet,
+    caPublicKeys: caPublicKeysOf(fleet, ca),
+    caCreated,
+    runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
+    knownHosts: ca.map((wiring) => wiring.knownHosts),
+  }
+  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID }), setup)
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,
-    instructions: "Manage a fleet of SSH hosts: pooled connections, host-routed exec and tmux tools.",
+    instructions:
+      "Manage a fleet of SSH hosts: pooled connections, host-routed exec and tmux tools. " +
+      "Call fleet_setup first if hosts_list is empty or a host fails to connect; it says what to configure next.",
   })
 
   const hostParam = z.string().describe("Configured host name (see hosts_list)")
@@ -271,6 +358,13 @@ async function main(): Promise<void> {
     description: "List configured fleet hosts and their live connection status.",
     parameters: z.object({}),
     execute: () => h.hostsList(),
+  })
+  server.addTool({
+    name: "fleet_setup",
+    description:
+      "Show setup state: config path, each host's connection state and last error, each CA's public key and the line to add on hosts, and what to do next. Read-only.",
+    parameters: z.object({}),
+    execute: () => h.fleetSetup(),
   })
   server.addTool({
     name: "exec",
@@ -332,7 +426,8 @@ async function main(): Promise<void> {
 
 // Only run when executed directly (not when imported by tests or other modules)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch((error) => {
+  const entry = process.argv[2] === "check" ? checkMain : main
+  entry().catch((error) => {
     console.error("Fatal error in main():", error)
     process.exit(1)
   })

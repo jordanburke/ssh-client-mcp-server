@@ -10,6 +10,7 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) and the shared `@ssh
 ## Contents
 
 - [Quick Start](#quick-start)
+- [First Run](#first-run)
 - [Config Discovery](#config-discovery)
 - [Fleet Config Schema](#fleet-config-schema)
 - [Auth Modes](#auth-modes)
@@ -19,13 +20,26 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) and the shared `@ssh
 - [Audit Log](#audit-log)
 - [CA Mode](#ca-mode)
 - [Client Setup](#client-setup)
+- [Command Line](#command-line)
 - [Development](#development)
 
 ## Quick Start
 
-1. Copy `fleet.example.toml` (in this directory) to `~/.config/ssh-fleet/fleet.toml` and fill in your hosts.
-2. Configure your MCP client to launch this server — see [Client Setup](#client-setup).
-3. Ask your LLM to list hosts or run commands across the fleet.
+1. Add the server to your MCP client with no `--config` — see [Client Setup](#client-setup).
+2. Ask your LLM to call `fleet_setup`. On first start the server wrote a commented starter config; `fleet_setup` says where.
+3. Uncomment an example host in that file, restart the server, and ask your LLM to list hosts or run commands.
+
+## First Run
+
+When no `--config` flag or `SSH_FLEET_CONFIG` is given and `~/.config/ssh-fleet/fleet.toml` doesn't exist, the server writes a starter config there (mode `0600`, folder `0700`) and starts with zero hosts. The file is all comments, with example blocks for a password host, a key host, a read-only policy and a CA; remove the leading `# ` from a block's lines to use it. Edits take effect on restart (in Claude Code, `/mcp` and reconnect).
+
+- **Only the default path is created.** A `--config` or `SSH_FLEET_CONFIG` path that doesn't exist fails startup, so a typo can't give you a healthy-looking server with no hosts.
+- **`fleet_setup` says what's missing:** an unset `password_env` variable, a host's last connection error, or a new CA's line to add on hosts.
+- **A misconfigured host doesn't stop the server.** A `key` file that can't be read, an unset `key_env`, or `agent = true` without `SSH_AUTH_SOCK` (Claude Desktop doesn't pass it) fails that host's calls with the reason, and `fleet_setup` shows it from the first start.
+- **A CA `key_file` that doesn't exist is created** (`ssh-keygen`, ed25519, `0600`). This keeps the key on disk; use `key_cmd` or `key_env` to keep it off disk instead. A typo in `key_file` creates a new CA that no host trusts, so check `fleet_setup` after any CA change.
+- **One client per config in CA mode.** A second server on the same config fails on the `runtime_dir` lock before it can explain itself, and Claude Desktop hides stderr. Give each client its own config with its own `runtime_dir`.
+- **Don't list the hub machine as a fleet host when its CA is a `key_file`.** An agent with `exec` there could read the key or use the server's private agent and sign its own certificates.
+- **Two clients starting at once** can race to create the same CA key; the loser fails to load it, and a restart fixes it.
 
 ## Config Discovery
 
@@ -35,7 +49,7 @@ The server looks for its fleet configuration in this order:
 2. `SSH_FLEET_CONFIG` environment variable — useful in Docker / systemd.
 3. Default location: `~/.config/ssh-fleet/fleet.toml`.
 
-If the config file cannot be read, or if it contains validation errors, the server logs the problem and exits immediately (fail-fast). No host is connected until an MCP tool call is received (lazy connect via the pool).
+If the default config is missing, the server creates it (see [First Run](#first-run)). If any other config file cannot be read, or a config contains validation errors, the server logs the problem and exits immediately (fail-fast). No host is connected until an MCP tool call is received (lazy connect via the pool).
 
 ## Fleet Config Schema
 
@@ -83,7 +97,9 @@ Per-host rules checked before every tool call. See [Policy](#policy). A key in a
 
 An empty list means "not set": `allow = []` is how a host drops an `allow` list it would otherwise inherit. With no policy anywhere, every call is allowed, as before policy existed.
 
-### `[[hosts]]` (required, one or more)
+### `[[hosts]]` (zero or more)
+
+With none, the server starts and `fleet_setup` says what to add.
 
 Each `[[hosts]]` entry defines a remote machine. Host names must be unique and may contain only letters, digits, hyphens, and underscores.
 
@@ -130,7 +146,7 @@ Use `password_env` pointing at an environment variable instead. This keeps secre
 
 ## Tools
 
-All tools except `hosts_list` require a `host` parameter — the logical name of a configured fleet host (from `[[hosts]].name`). An unknown name raises an error immediately, before any SSH attempt.
+All tools except `hosts_list` and `fleet_setup` require a `host` parameter — the logical name of a configured fleet host (from `[[hosts]].name`). An unknown name raises an error immediately, before any SSH attempt.
 
 ### `hosts_list`
 
@@ -139,6 +155,20 @@ List configured fleet hosts and their live connection-pool status.
 Parameters: none.
 
 Returns a JSON array of `{ name, state, inFlight }` objects, where `state` is one of `"connected"`, `"idle"`, or `"disconnected"`, and `inFlight` is the count of currently active connections to that host.
+
+### `fleet_setup`
+
+Show setup state and what to do next. Read-only: it never writes config or keys. Audited like `hosts_list`.
+
+Parameters: none.
+
+Returns JSON:
+
+- `config`: `{ path, created_this_start }`.
+- `next_steps`: what to do, in order: add a host, set a missing `password_env` variable, add a new CA's line on hosts, and each host's last connection error.
+- `hosts`: per host, `name`, `address` (`user@host:port`), `auth` (`password_env`, `key`, `key_env`, `agent` or `ca`), `connections` (the `hosts_list` rows for it), and when they apply `password_env` with `env_set` (never the value), `ca`, `principal`, `last_error` `{ message, at }`, and `enroll_line`.
+- `cas`: per CA, `name`, `key_source` (`key_cmd`, `key_env` or `key_file`; a `key_cmd` string is never shown), `key_file`, `created_this_start`, `public_key` and `enroll_line` (`cert-authority,principals="…" <public key>`).
+- `audit_log`, and in CA mode `runtime_dir` and `known_hosts`.
 
 ### `exec`
 
@@ -302,10 +332,10 @@ Use `AuthorizedKeysFile /etc/ssh/authorized_keys/%u` in `sshd_config`, or `Trust
 The server loads the CA at startup with no interactive unlock, so it restarts unattended. Keep the canonical copy in your password manager, and give the server a working copy only it can read:
 
 - **macOS:** `key_cmd` reading the hub user's keychain (`security find-generic-password -s ssh-fleet-ca -w`).
-- **Linux:** a `0600` `key_file` owned by the hub user.
+- **Linux:** a `0600` `key_file` owned by the hub user. If the file doesn't exist, the server creates it on first start, and `fleet_setup` shows the line to add on hosts.
 - **Either:** `key_cmd` against a non-interactive secrets service (`op read …`, Bitwarden Secrets Manager, Infisical), or `key_env`.
 
-The key reaches `ssh-add` on stdin and is never written to disk. A `key_cmd` must finish within 30 seconds and runs without a terminal, so a command that would prompt fails startup, naming the CA, instead of hanging.
+The key reaches `ssh-add` on stdin; the server never writes it to disk except when it creates a missing `key_file`. A `key_cmd` must finish within 30 seconds and runs without a terminal, so a command that would prompt fails startup, naming the CA, instead of hanging.
 
 ### What a certificate allows
 
@@ -365,18 +395,21 @@ password_env = "BOXC_SSH_PASSWORD"   # value read from the env var, never inline
 
 ### `.mcp.json` / `claude_desktop_config.json`
 
+With no `--config`, the server uses `~/.config/ssh-fleet/fleet.toml` and creates it on first start (see [First Run](#first-run)). Put each host's `password_env` / `key_env` variables in the `env` block:
+
 ```json
 {
   "mcpServers": {
     "ssh-fleet": {
       "command": "node",
-      "args": ["packages/orchestrator/dist/index.js", "--config=${SSH_FLEET_CONFIG}"]
+      "args": ["packages/orchestrator/dist/index.js"],
+      "env": { "MINI_SSH_PASSWORD": "…" }
     }
   }
 }
 ```
 
-Or via `npx` once published:
+Or via `npx` once published, with an explicit config (which must already exist):
 
 ```json
 {
@@ -389,7 +422,29 @@ Or via `npx` once published:
 }
 ```
 
-Set `SSH_FLEET_CONFIG` in your environment (or the MCP client's `env` block) if you prefer the env-var discovery path over an explicit `--config` flag.
+Set `SSH_FLEET_CONFIG` in your environment (or the MCP client's `env` block) if you prefer the env-var discovery path over an explicit `--config` flag. In CA mode, give each client its own config and `runtime_dir`.
+
+## Command Line
+
+### `check`
+
+```sh
+ssh-fleet-mcp-server check [--config=<path>]
+```
+
+Connects to every host from a terminal and runs `true`, printing one line per host as it finishes, then each CA's enrollment line. Exits 0 when every host passes (or there are none), 1 otherwise.
+
+```
+ok    mini me@mini.local:22   password_env 212 ms
+FAIL  nas  fleet@nas.local:22 ca           Permission denied (publickey).
+CA home: cert-authority,principals="fleet" ssh-ed25519 AAAA… ssh-fleet-ca-home
+```
+
+- It never creates a config or key. A CA whose `key_file` is missing fails its hosts with a hint, without connecting.
+- It skips policy, so it can run `true` even on a `readonly` or `deny` host. Each probe is audited with `tool: "check"`, `agent: "operator"`, `bypass: "policy"`. It isn't reachable over MCP.
+- It uses its own runtime dir (`<runtime_dir>-check`), so it works while the server is running.
+- A `ForceCommand` account that doesn't allow `true` fails the check.
+- Run it with the same environment the MCP client gives the server, so `password_env` and `key_env` variables are set.
 
 ## Development
 

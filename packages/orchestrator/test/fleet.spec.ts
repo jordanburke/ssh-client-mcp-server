@@ -307,3 +307,80 @@ agent = true
     if (r.isLeft()) expect(r.value).toContain("invalid host name")
   })
 })
+
+describe("zero hosts and auth kinds", () => {
+  it("a config with no hosts parses", () => {
+    const r = parseFleet("")
+    expect(r.isRight()).toBe(true)
+    if (r.isRight()) {
+      expect(r.value.hosts).toEqual([])
+      expect(r.value.audit.path).toBe("~/.local/state/ssh-fleet/audit.jsonl")
+    }
+  })
+
+  it("no hosts is a warning", () => {
+    const r = parseFleet("")
+    if (r.isLeft()) throw new Error(r.value)
+    expect(fleetWarnings(r.value)).toContain("no hosts configured; add a [[hosts]] entry and restart")
+  })
+
+  it("each host records its auth kind", () => {
+    const r = parseFleet(`
+[[cas]]
+name = "home"
+key_cmd = "op read x"
+[[hosts]]
+name = "p"
+host = "h"
+password_env = "FLEET_TEST_PW"
+[[hosts]]
+name = "k"
+host = "h"
+key = "/keys/k"
+[[hosts]]
+name = "ke"
+host = "h"
+key_env = "FLEET_TEST_KEY"
+[[hosts]]
+name = "a"
+host = "h"
+agent = true
+[[hosts]]
+name = "c"
+host = "h"
+ca = "home"
+`)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.hosts.map((h) => h.authKind)).toEqual(["password_env", "key", "key_env", "agent", "ca"])
+  })
+
+  it("password_env keeps the variable name, not just the value", () => {
+    const toml = `
+[[hosts]]
+name = "mini"
+host = "h"
+password_env = "FLEET_TEST_MINI_PW"
+`
+    delete process.env.FLEET_TEST_MINI_PW
+    const unset = parseFleet(toml)
+    process.env.FLEET_TEST_MINI_PW = "pw"
+    const set = parseFleet(toml)
+    delete process.env.FLEET_TEST_MINI_PW
+    for (const r of [unset, set]) {
+      if (r.isLeft()) throw new Error(r.value)
+      expect(r.value.hosts[0].passwordEnv.orElse("")).toBe("FLEET_TEST_MINI_PW")
+    }
+  })
+
+  it("an unset password_env is a warning", () => {
+    delete process.env.FLEET_TEST_MINI_PW
+    const r = parseFleet(`
+[[hosts]]
+name = "mini"
+host = "h"
+password_env = "FLEET_TEST_MINI_PW"
+`)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(fleetWarnings(r.value)).toContain('host "mini": password_env FLEET_TEST_MINI_PW is not set')
+  })
+})

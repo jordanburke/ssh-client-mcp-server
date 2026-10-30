@@ -118,17 +118,106 @@ agent = true
     }
   })
 
-  it("fails when a host's auth cannot resolve (missing key-env)", async () => {
+  it("an empty fleet builds a runner", async () => {
+    const f = parseFleet("")
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.status()).toEqual([])
+    await expect(r.value.exec("x", "true", "unknown")).rejects.toThrow()
+    await r.value.shutdown()
+  })
+
+  it("unknown host with no hosts says so", async () => {
+    const f = parseFleet("")
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.tmuxRunnerFor("x", "unknown").swap().orElse("")).toBe('unknown host "x" — no hosts are configured')
+    await r.value.shutdown()
+  })
+
+  it("a failed connect is recorded", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const refused: ConnectFactory = async () => {
+      throw new Error("connect ECONNREFUSED 10.0.0.11:22")
+    }
+    const r = await buildFleetRunner(fleet.value, refused)
+    if (r.isLeft()) throw new Error(r.value)
+    await expect(r.value.exec("box-a", "true", "unknown")).rejects.toThrow("ECONNREFUSED")
+    expect(
+      r.value
+        .lastError("box-a")
+        .map((e) => e.message)
+        .orElse(""),
+    ).toContain("ECONNREFUSED")
+    await r.value.shutdown()
+  })
+
+  it("a later success clears it", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    let fail = true
+    const flaky: ConnectFactory = async () => {
+      if (fail) throw new Error("connect ECONNREFUSED")
+      return fakeConn
+    }
+    const r = await buildFleetRunner(fleet.value, flaky)
+    if (r.isLeft()) throw new Error(r.value)
+    await expect(r.value.exec("box-a", "true", "unknown")).rejects.toThrow()
+    fail = false
+    await r.value.exec("box-a", "true", "unknown")
+    expect(r.value.lastError("box-a").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
+  it("a non-zero exit is not a connect error", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const exits1: ConnectFactory = async () => ({
+      ...fakeConn,
+      exec: async () => ({ stdout: "", stderr: "nope", code: 1 }),
+    })
+    const r = await buildFleetRunner(fleet.value, exits1)
+    if (r.isLeft()) throw new Error(r.value)
+    await r.value.exec("box-a", "false", "unknown")
+    expect(r.value.lastError("box-a").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
+  it("an unknown host is not recorded", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const r = await buildFleetRunner(fleet.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    await expect(r.value.exec("nope", "true", "unknown")).rejects.toThrow()
+    expect(r.value.lastError("nope").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
+  it("a host whose auth cannot resolve is reported, not fatal", async () => {
     delete process.env.NOPE_KEY
     const f = parseFleet(`
 [[hosts]]
 name = "x"
 host = "1.2.3.4"
 key_env = "NOPE_KEY"
+[[hosts]]
+name = "y"
+host = "1.2.3.5"
+agent = true
 `)
     if (f.isLeft()) throw new Error(f.value)
     const r = await buildFleetRunner(f.value, connect)
-    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) throw new Error(r.value)
+    // Known before any call, so fleet_setup can show it on a fresh start.
+    expect(
+      r.value
+        .lastError("x")
+        .map((e) => e.message)
+        .orElse(""),
+    ).toContain("NOPE_KEY")
+    await expect(r.value.exec("x", "true", "unknown")).rejects.toThrow("NOPE_KEY")
+    expect(r.value.status()).toContainEqual({ name: "x", state: "disconnected", inFlight: 0 })
+    expect((await r.value.exec("y", "true", "unknown")).code).toBe(0)
+    await r.value.shutdown()
   })
 })
 
