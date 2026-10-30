@@ -3,10 +3,11 @@ import { lstat } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 import { childEnv, type ProcessRunner } from "@ssh-mcp/core"
-import { Either, Left, Option, Right, Try } from "functype"
+import { Either, Left, type Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
 
-import { type CaEntry } from "./fleet.js"
+import { type AuthKind, type CaEntry, type Fleet, type HostEntry } from "./fleet.js"
+import { type FleetRunner, type HostError } from "./runners.js"
 import { FLEET_TEMPLATE } from "./template.js"
 
 export type ConfigPath = Readonly<{ path: string; explicit: boolean }>
@@ -84,4 +85,147 @@ export const ensureCaKeyFiles = async (
     return Left(`CA "${ca.name}": creating key_file ${path} failed: ${r.stderr.trim() || `exit ${r.code}`}`)
   })
   return created.map((names) => names.flat())
+}
+
+// What fleet_setup reports from, fixed once startup finishes.
+export type SetupContext = Readonly<{
+  configPath: string
+  configCreated: boolean
+  fleet: Fleet
+  // CA name → its public key line, as loaded into custody.
+  caPublicKeys: Map<string, string>
+  caCreated: ReadonlyArray<string>
+  runtimeDir: Option<string>
+  knownHosts: Option<string>
+}>
+
+type ConnectionRow = ReturnType<FleetRunner["status"]>[number]
+
+export type HostReport = Readonly<{
+  name: string
+  address: string
+  auth: AuthKind
+  password_env?: string
+  env_set?: boolean
+  ca?: string
+  principal?: string
+  connections: ReadonlyArray<ConnectionRow>
+  last_error?: HostError
+  enroll_line?: string
+}>
+
+export type CaReport = Readonly<{
+  name: string
+  key_source: "key_cmd" | "key_env" | "key_file"
+  key_file?: string
+  created_this_start: boolean
+  public_key?: string
+  enroll_line?: string
+}>
+
+export type SetupReport = Readonly<{
+  config: Readonly<{ path: string; created_this_start: boolean }>
+  next_steps: ReadonlyArray<string>
+  hosts: ReadonlyArray<HostReport>
+  cas: ReadonlyArray<CaReport>
+  audit_log: string
+  runtime_dir?: string
+  known_hosts?: string
+}>
+
+export const enrollLine = (principal: string, publicKey: string): string =>
+  `cert-authority,principals="${principal}" ${publicKey.trim()}`
+
+const KEY_SOURCE = { cmd: "key_cmd", env: "key_env", file: "key_file" } as const
+
+// Built field by field: a HostEntry carries a resolved password in `auth`, so no whole entry, and no
+// key_cmd string, may reach the report.
+const hostReport = (
+  h: HostEntry,
+  ctx: SetupContext,
+  runner: Pick<FleetRunner, "status" | "lastError">,
+  env: NodeJS.ProcessEnv,
+): HostReport => {
+  const ca = h.ca.flatMap((name) => Option(ctx.fleet.cas.find((c) => c.name === name)))
+  const principal = h.principal.or(ca.map((c) => c.principal))
+  const enroll = ca
+    .flatMap((c) => ctx.caPublicKeys.get(c.name))
+    .flatMap((pub) => principal.map((p) => enrollLine(p, pub)))
+  return {
+    name: h.name,
+    address: h.user.fold(
+      () => `${h.host}:${h.port}`,
+      (u) => `${u}@${h.host}:${h.port}`,
+    ),
+    auth: h.authKind,
+    ...h.passwordEnv.fold(
+      () => ({}),
+      (v) => ({ password_env: v, env_set: Boolean(env[v]) }),
+    ),
+    ...h.ca.fold(
+      () => ({}),
+      (name) => ({ ca: name, principal: principal.orElse("") }),
+    ),
+    connections: runner.status().filter((row) => row.name === h.name || row.name.startsWith(`${h.name} (`)),
+    ...runner.lastError(h.name).fold(
+      () => ({}),
+      (e) => ({ last_error: e }),
+    ),
+    ...enroll.fold(
+      () => ({}),
+      (line) => ({ enroll_line: line }),
+    ),
+  }
+}
+
+const caReport = (c: CaEntry, ctx: SetupContext): CaReport => {
+  const pub = ctx.caPublicKeys.get(c.name)
+  return {
+    name: c.name,
+    key_source: KEY_SOURCE[c.key.kind],
+    ...(c.key.kind === "file" ? { key_file: c.key.path } : {}),
+    created_this_start: ctx.caCreated.includes(c.name),
+    ...pub.fold(
+      () => ({}),
+      (p) => ({ public_key: p.trim(), enroll_line: enrollLine(c.principal, p) }),
+    ),
+  }
+}
+
+// The fleet_setup tool's answer: what is configured, its live state, and what to do next.
+export const setupReport = (
+  ctx: SetupContext,
+  runner: Pick<FleetRunner, "status" | "lastError">,
+  env: NodeJS.ProcessEnv = process.env,
+): SetupReport => {
+  const hosts = ctx.fleet.hosts.map((h) => hostReport(h, ctx, runner, env))
+  const cas = ctx.fleet.cas.map((c) => caReport(c, ctx))
+  const nextSteps = [
+    ...(hosts.length === 0 ? [`Add a [[hosts]] entry to ${ctx.configPath}, then restart the server.`] : []),
+    ...hosts
+      .filter((h) => h.env_set === false)
+      .map((h) => `${h.name}: set ${h.password_env} in the MCP client's env for this server, then restart.`),
+    ...cas
+      .filter((c) => c.created_this_start && c.enroll_line !== undefined)
+      .map(
+        (c) =>
+          `Add CA "${c.name}"'s line to a root-owned authorized-keys file on each host that uses it: ${c.enroll_line}`,
+      ),
+    ...hosts.flatMap((h) => (h.last_error ? [`${h.name}: ${h.last_error.message}`] : [])),
+  ]
+  return {
+    config: { path: ctx.configPath, created_this_start: ctx.configCreated },
+    next_steps: nextSteps,
+    hosts,
+    cas,
+    audit_log: ctx.fleet.audit.path,
+    ...ctx.runtimeDir.fold(
+      () => ({}),
+      (d) => ({ runtime_dir: d }),
+    ),
+    ...ctx.knownHosts.fold(
+      () => ({}),
+      (k) => ({ known_hosts: k }),
+    ),
+  }
 }
