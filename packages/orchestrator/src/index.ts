@@ -43,7 +43,7 @@ import {
   type FleetRunner,
   selfTestCas,
 } from "./runners.js"
-import { ensureConfig, resolveConfigPath } from "./setup.js"
+import { ensureCaKeyFiles, ensureConfig, resolveConfigPath } from "./setup.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -181,11 +181,22 @@ const expanded = (path: string): string =>
     (p) => p,
   )
 
-// When any host uses ca auth: check OpenSSH, prepare the runtime dir and known_hosts, and load every
-// CA key into a private ssh-agent. Each failure stops startup.
-const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
-  if (!fleet.hosts.some((h) => h.ca.isSome())) return Option.none<CaWiring>()
+type CaStart = Readonly<{ wiring: Option<CaWiring>; created: ReadonlyArray<string> }>
+
+// When any [[cas]] entry exists (with or without hosts using it yet): check OpenSSH, create any missing
+// key_file, prepare the runtime dir and known_hosts, and load every CA key into a private ssh-agent.
+// Each failure stops startup.
+const startCa = async (fleet: Fleet): Promise<CaStart> => {
+  if (fleet.cas.length === 0) return { wiring: Option.none<CaWiring>(), created: [] }
   ;(await checkOpenSsh(nodeProcessRunner)).fold(fatal, () => undefined)
+  const created = (await ensureCaKeyFiles(fleet.cas, nodeProcessRunner)).fold(fatal, (names) => names)
+  fleet.cas
+    .filter((c) => created.includes(c.name))
+    .forEach((c) =>
+      console.error(
+        `created CA "${c.name}" key at ${c.key.kind === "file" ? c.key.path : ""}; add its line to each host (see fleet_setup)`,
+      ),
+    )
   const runtimeDir = fleet.runtimeDir.map(expanded).orElse(defaultRuntimeDir())
   const knownHosts = fleet.knownHosts.map(expanded).orElse(defaultKnownHosts())
   // Socket paths are fixed-length below runtimeDir, so one check covers every (agent, host).
@@ -204,7 +215,7 @@ const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
     await custody.shutdown()
     fatal(selfTest.value)
   }
-  return Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts })
+  return { wiring: Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts }), created }
 }
 
 async function main(): Promise<void> {
@@ -238,7 +249,7 @@ async function main(): Promise<void> {
     (s) => s,
   )
 
-  const ca = await startCa(fleet)
+  const { wiring: ca } = await startCa(fleet)
   const runner = await (
     await buildFleetRunner(fleet, undefined, ca)
   ).fold(
