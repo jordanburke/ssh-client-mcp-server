@@ -13,6 +13,9 @@ export type HostEntry = Readonly<{
   port: number
   user: Option<string>
   auth: ResolveAuthOptions
+  // Which auth field the host set. Kept apart from `auth`, which holds a resolved password.
+  authKind: AuthKind
+  passwordEnv: Option<string>
   tmuxSession: string
   logOutput: boolean
   policy: HostPolicy
@@ -20,6 +23,8 @@ export type HostEntry = Readonly<{
   ca: Option<string>
   principal: Option<string>
 }>
+
+export type AuthKind = "password_env" | "key" | "key_env" | "agent" | "ca"
 
 export type PoolSettings = Readonly<{ maxPerHost: number; idleTimeoutMs: number; acquireTimeoutMs: number }>
 
@@ -48,33 +53,34 @@ const str = (v: unknown): Option<string> => (typeof v === "string" && v.length >
 const num = (v: unknown): Option<number> => (typeof v === "number" ? Option(v) : Option.none<number>())
 
 // Exactly-one-auth + secrets-by-reference. Returns the auth options or an error string.
-const resolveHostAuth = (name: string, h: RawHost): Either<string, ResolveAuthOptions> => {
+type HostAuth = Readonly<{ auth: ResolveAuthOptions; kind: AuthKind }>
+
+const resolveHostAuth = (name: string, h: RawHost): Either<string, HostAuth> => {
   if (h.password !== undefined || h.private_key !== undefined) {
-    return Left<string, ResolveAuthOptions>(
-      `host "${name}": secrets must not be inline; use key/key_env/agent/password_env/ca`,
-    )
+    return Left<string, HostAuth>(`host "${name}": secrets must not be inline; use key/key_env/agent/password_env/ca`)
   }
   const modes = [
-    str(h.key).map(() => "key"),
-    str(h.key_env).map(() => "key_env"),
-    str(h.password_env).map(() => "password_env"),
-    h.agent === true ? Option("agent") : Option.none<string>(),
-    str(h.ca).map(() => "ca"),
-  ].filter((o) => o.isSome())
+    str(h.key).map((): AuthKind => "key"),
+    str(h.key_env).map((): AuthKind => "key_env"),
+    str(h.password_env).map((): AuthKind => "password_env"),
+    h.agent === true ? Option<AuthKind>("agent") : Option.none<AuthKind>(),
+    str(h.ca).map((): AuthKind => "ca"),
+  ].flatMap((o) => o.toArray())
   if (modes.length === 0)
-    return Left<string, ResolveAuthOptions>(
+    return Left<string, HostAuth>(
       `host "${name}": no auth mode (need exactly one of key/key_env/agent/password_env/ca)`,
     )
   if (modes.length > 1)
-    return Left<string, ResolveAuthOptions>(`host "${name}": exactly one auth mode allowed, found ${modes.length}`)
-  return Right<string, ResolveAuthOptions>({
+    return Left<string, HostAuth>(`host "${name}": exactly one auth mode allowed, found ${modes.length}`)
+  const auth: ResolveAuthOptions = {
     password: str(h.password_env)
       .flatMap((v) => Option(process.env[v] ?? ""))
       .filter((v) => v.length > 0),
     keyPath: str(h.key),
     keyEnvVar: str(h.key_env),
     useAgent: h.agent === true,
-  })
+  }
+  return Right<string, HostAuth>({ auth, kind: modes[0] })
 }
 
 const parsePool = (raw: Record<string, unknown>): PoolSettings => {
@@ -181,8 +187,6 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
   const defaultsPolicy = parsePolicyTable(defaults.policy, "defaults.policy")
   const defaultsTable: PolicyTable = defaultsPolicy.orElse(EMPTY_TABLE)
 
-  if (rawHosts.length === 0) return Left<string, Fleet>("Fleet config has no [[hosts]] entries")
-
   const names = rawHosts.map((h) => str(h.name).orElse(""))
   const rawCas = Array.isArray(raw.cas) ? (raw.cas as RawHost[]) : []
   const caNames = rawCas.map((c) => str(c.name).orElse(""))
@@ -207,13 +211,15 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
     const policy = parsePolicyTable(h.policy, where)
       .flatMap((table) => resolvePolicy(where, defaultsTable, table))
       .mapLeft((errs) => errs.join("\n"))
-    return resolveHostAuth(name, h).flatMap((auth) =>
+    return resolveHostAuth(name, h).flatMap(({ auth, kind }) =>
       policy.map((p) => ({
         name,
         host: address.orElse(""),
         port: num(h.port).orElse(defaultPort),
         user: str(h.user).or(defaultUser),
         auth,
+        authKind: kind,
+        passwordEnv: str(h.password_env),
         tmuxSession: str(h.tmux_session).orElse(defaultSession),
         logOutput: h.log_output === true,
         policy: p,
@@ -272,8 +278,19 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
       })
 }
 
-// Hosts that will deny every call until agent identity exists (the agent is "unknown" until then).
-export const fleetWarnings = (fleet: Fleet): ReadonlyArray<string> =>
-  fleet.hosts
+// Startup warnings: an empty fleet, a password variable that isn't set, and hosts that will deny
+// every call until agent identity exists (the agent is "unknown" until then).
+export const fleetWarnings = (fleet: Fleet): ReadonlyArray<string> => [
+  ...(fleet.hosts.length === 0 ? ["no hosts configured; add a [[hosts]] entry and restart"] : []),
+  ...fleet.hosts.flatMap((h) =>
+    h.passwordEnv
+      .filter((v) => !process.env[v])
+      .fold(
+        () => [],
+        (v) => [`host "${h.name}": password_env ${v} is not set`],
+      ),
+  ),
+  ...fleet.hosts
     .filter((h) => h.policy.agents.isSome())
-    .map((h) => `host "${h.name}": policy.agents is set, so every call is denied until agent identity is available`)
+    .map((h) => `host "${h.name}": policy.agents is set, so every call is denied until agent identity is available`),
+]

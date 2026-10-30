@@ -118,6 +118,25 @@ agent = true
     }
   })
 
+  it("an empty fleet builds a runner", async () => {
+    const f = parseFleet("")
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.status()).toEqual([])
+    await expect(r.value.exec("x", "true", "unknown")).rejects.toThrow()
+    await r.value.shutdown()
+  })
+
+  it("unknown host with no hosts says so", async () => {
+    const f = parseFleet("")
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.tmuxRunnerFor("x", "unknown").swap().orElse("")).toBe('unknown host "x" — no hosts are configured')
+    await r.value.shutdown()
+  })
+
   it("fails when a host's auth cannot resolve (missing key-env)", async () => {
     delete process.env.NOPE_KEY
     const f = parseFleet(`

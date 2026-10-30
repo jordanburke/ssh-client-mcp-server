@@ -235,7 +235,11 @@ const makeRunner = (
     tmuxRunnerFor: (host, agent) =>
       names.has(host)
         ? Right<string, TmuxRunner>((command) => runOn(host, command, agent))
-        : Left<string, TmuxRunner>(`unknown host "${host}" — configured: ${[...names].join(", ")}`),
+        : Left<string, TmuxRunner>(
+            names.size === 0
+              ? `unknown host "${host}" — no hosts are configured`
+              : `unknown host "${host}" — configured: ${[...names].join(", ")}`,
+          ),
     exec: (host, command, agent) => runOn(host, command, agent),
     status: () => [...sshPool.status(), ...caStatus()],
     // Pools first (closes connections), then every master is awaited, and only then is the CA
