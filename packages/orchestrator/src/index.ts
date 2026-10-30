@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import {
@@ -43,6 +43,7 @@ import {
   type FleetRunner,
   selfTestCas,
 } from "./runners.js"
+import { ensureConfig, resolveConfigPath } from "./setup.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -169,12 +170,6 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor) => {
   }
 }
 
-const findConfigPath = (argv: ReadonlyArray<string>): string => {
-  const flag = argv.find((a) => a.startsWith("--config="))
-  if (flag) return flag.slice("--config=".length)
-  return process.env.SSH_FLEET_CONFIG ?? join(homedir(), ".config", "ssh-fleet", "fleet.toml")
-}
-
 const fatal = (msg: string): never => {
   console.error(msg)
   return process.exit(1)
@@ -213,7 +208,9 @@ const startCa = async (fleet: Fleet): Promise<Option<CaWiring>> => {
 }
 
 async function main(): Promise<void> {
-  const configPath = findConfigPath(process.argv.slice(2))
+  const config = ensureConfig(resolveConfigPath(process.argv.slice(2), process.env, homedir())).fold(fatal, (c) => c)
+  if (config.created) console.error(`created fleet config at ${config.path}`)
+  const configPath = config.path
   const raw = Try(() => readFileSync(configPath, "utf8")).fold(
     (e) => {
       console.error(`Cannot read fleet config at ${configPath}: ${(e as Error).message}`)
