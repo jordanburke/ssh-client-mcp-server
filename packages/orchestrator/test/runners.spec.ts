@@ -137,6 +137,61 @@ agent = true
     await r.value.shutdown()
   })
 
+  it("a failed connect is recorded", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const refused: ConnectFactory = async () => {
+      throw new Error("connect ECONNREFUSED 10.0.0.11:22")
+    }
+    const r = await buildFleetRunner(fleet.value, refused)
+    if (r.isLeft()) throw new Error(r.value)
+    await expect(r.value.exec("box-a", "true", "unknown")).rejects.toThrow("ECONNREFUSED")
+    expect(
+      r.value
+        .lastError("box-a")
+        .map((e) => e.message)
+        .orElse(""),
+    ).toContain("ECONNREFUSED")
+    await r.value.shutdown()
+  })
+
+  it("a later success clears it", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    let fail = true
+    const flaky: ConnectFactory = async () => {
+      if (fail) throw new Error("connect ECONNREFUSED")
+      return fakeConn
+    }
+    const r = await buildFleetRunner(fleet.value, flaky)
+    if (r.isLeft()) throw new Error(r.value)
+    await expect(r.value.exec("box-a", "true", "unknown")).rejects.toThrow()
+    fail = false
+    await r.value.exec("box-a", "true", "unknown")
+    expect(r.value.lastError("box-a").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
+  it("a non-zero exit is not a connect error", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const exits1: ConnectFactory = async () => ({
+      ...fakeConn,
+      exec: async () => ({ stdout: "", stderr: "nope", code: 1 }),
+    })
+    const r = await buildFleetRunner(fleet.value, exits1)
+    if (r.isLeft()) throw new Error(r.value)
+    await r.value.exec("box-a", "false", "unknown")
+    expect(r.value.lastError("box-a").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
+  it("an unknown host is not recorded", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const r = await buildFleetRunner(fleet.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    await expect(r.value.exec("nope", "true", "unknown")).rejects.toThrow()
+    expect(r.value.lastError("nope").isNone()).toBe(true)
+    await r.value.shutdown()
+  })
+
   it("fails when a host's auth cannot resolve (missing key-env)", async () => {
     delete process.env.NOPE_KEY
     const f = parseFleet(`

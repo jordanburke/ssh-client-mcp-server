@@ -34,8 +34,12 @@ export type FleetRunner = Readonly<{
   logOutputFor: (host: string) => boolean
   policyFor: (host: string) => Option<HostPolicy>
   status: () => HostStatus[]
+  // The last connect or transport failure on a configured host, cleared by its next success.
+  lastError: (host: string) => Option<HostError>
   shutdown: () => Promise<void>
 }>
+
+export type HostError = Readonly<{ message: string; at: string }>
 
 // What CA hosts need at runtime. `openFor` replaces the real OpenSSH factory, for tests.
 export type CaWiring = Readonly<{
@@ -209,7 +213,7 @@ const makeRunner = (
     return pool
   }
 
-  const runOn = (host: string, command: string, agent: string): Promise<CommandResult> =>
+  const route = (host: string, command: string, agent: string): Promise<CommandResult> =>
     caHostByName.get(host).fold(
       () => sshPool.run(host, command),
       (h) =>
@@ -217,6 +221,22 @@ const makeRunner = (
           () => Promise.reject(new Error(`host "${host}" uses ca auth but CA custody is not running`)),
           (wiring) => caPoolFor(h, agent, wiring).run(host, command),
         ),
+    )
+
+  const lastErrors = new globalThis.Map<string, HostError>()
+
+  // A rejection is a connect or transport failure; a non-zero exit code resolves and isn't one.
+  // Only configured hosts are recorded, so unknown names can't grow the map.
+  const runOn = (host: string, command: string, agent: string): Promise<CommandResult> =>
+    route(host, command, agent).then(
+      (result) => {
+        lastErrors.delete(host)
+        return result
+      },
+      (e: unknown) => {
+        if (names.has(host)) lastErrors.set(host, { message: (e as Error).message, at: new Date().toISOString() })
+        return Promise.reject(e)
+      },
     )
 
   const caStatus = (): HostStatus[] =>
@@ -242,6 +262,7 @@ const makeRunner = (
           ),
     exec: (host, command, agent) => runOn(host, command, agent),
     status: () => [...sshPool.status(), ...caStatus()],
+    lastError: (host) => Option(lastErrors.get(host)),
     // Pools first (closes connections), then every master is awaited, and only then is the CA
     // agent stopped and the runtime dir removed.
     shutdown: async () => {
