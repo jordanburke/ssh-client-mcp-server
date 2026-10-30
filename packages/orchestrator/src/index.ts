@@ -331,6 +331,7 @@ async function main(): Promise<void> {
 
   const { wiring: ca, created: caCreated } = await startCa(fleet, "serve")
   const runner = await buildRunnerOrExit(fleet, ca)
+  fleet.hosts.forEach((host) => runner.lastError(host.name).forEach((e) => console.error(`warning: ${e.message}`)))
 
   const setup: SetupContext = {
     configPath,

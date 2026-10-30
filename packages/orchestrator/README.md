@@ -35,6 +35,7 @@ When no `--config` flag or `SSH_FLEET_CONFIG` is given and `~/.config/ssh-fleet/
 
 - **Only the default path is created.** A `--config` or `SSH_FLEET_CONFIG` path that doesn't exist fails startup, so a typo can't give you a healthy-looking server with no hosts.
 - **`fleet_setup` says what's missing:** an unset `password_env` variable, a host's last connection error, or a new CA's line to add on hosts.
+- **A misconfigured host doesn't stop the server.** A `key` file that can't be read, an unset `key_env`, or `agent = true` without `SSH_AUTH_SOCK` (Claude Desktop doesn't pass it) fails that host's calls with the reason, and `fleet_setup` shows it from the first start.
 - **A CA `key_file` that doesn't exist is created** (`ssh-keygen`, ed25519, `0600`). This keeps the key on disk; use `key_cmd` or `key_env` to keep it off disk instead. A typo in `key_file` creates a new CA that no host trusts, so check `fleet_setup` after any CA change.
 - **One client per config in CA mode.** A second server on the same config fails on the `runtime_dir` lock before it can explain itself, and Claude Desktop hides stderr. Give each client its own config with its own `runtime_dir`.
 - **Don't list the hub machine as a fleet host when its CA is a `key_file`.** An agent with `exec` there could read the key or use the server's private agent and sign its own certificates.

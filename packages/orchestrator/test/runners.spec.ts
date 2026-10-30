@@ -192,17 +192,32 @@ agent = true
     await r.value.shutdown()
   })
 
-  it("fails when a host's auth cannot resolve (missing key-env)", async () => {
+  it("a host whose auth cannot resolve is reported, not fatal", async () => {
     delete process.env.NOPE_KEY
     const f = parseFleet(`
 [[hosts]]
 name = "x"
 host = "1.2.3.4"
 key_env = "NOPE_KEY"
+[[hosts]]
+name = "y"
+host = "1.2.3.5"
+agent = true
 `)
     if (f.isLeft()) throw new Error(f.value)
     const r = await buildFleetRunner(f.value, connect)
-    expect(r.isLeft()).toBe(true)
+    if (r.isLeft()) throw new Error(r.value)
+    // Known before any call, so fleet_setup can show it on a fresh start.
+    expect(
+      r.value
+        .lastError("x")
+        .map((e) => e.message)
+        .orElse(""),
+    ).toContain("NOPE_KEY")
+    await expect(r.value.exec("x", "true", "unknown")).rejects.toThrow("NOPE_KEY")
+    expect(r.value.status()).toContainEqual({ name: "x", state: "disconnected", inFlight: 0 })
+    expect((await r.value.exec("y", "true", "unknown")).code).toBe(0)
+    await r.value.shutdown()
   })
 })
 

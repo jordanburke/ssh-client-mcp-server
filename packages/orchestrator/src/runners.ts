@@ -149,14 +149,22 @@ export const buildFleetRunner = async (
   if (caHosts.length > 0 && ca.isNone())
     return Left<string, FleetRunner>(`host "${caHosts[0].name}" uses ca auth but CA custody is not running`)
 
-  const resolved = await Either.traverseAsync(sshHosts, async (h) => {
-    const cfg = await toSshConfig(h)
-    return cfg.fold(
-      (e) => Left<string, { name: string; sshConfig: ConnectConfig }>(`host "${h.name}": ${e}`),
-      (sshConfig) => Right<string, { name: string; sshConfig: ConnectConfig }>({ name: h.name, sshConfig }),
-    )
-  })
-  return resolved.map((hosts) => makeRunner(fleet, hosts, caHosts, ca, connect))
+  // A host whose auth can't resolve (a missing key file, an unset key_env, no SSH_AUTH_SOCK) doesn't
+  // stop startup: it fails every call with the reason, and fleet_setup shows it from the first start.
+  const resolved = await Promise.all(sshHosts.map(async (h) => ({ name: h.name, sshConfig: await toSshConfig(h) })))
+  const ready = resolved.flatMap(({ name, sshConfig }) =>
+    sshConfig.fold<Array<{ name: string; sshConfig: ConnectConfig }>>(
+      () => [],
+      (cfg) => [{ name, sshConfig: cfg }],
+    ),
+  )
+  const authErrors = resolved.flatMap(({ name, sshConfig }) =>
+    sshConfig.fold<Array<[string, string]>>(
+      (e) => [[name, `host "${name}": ${e}`]],
+      () => [],
+    ),
+  )
+  return Right<string, FleetRunner>(makeRunner(fleet, ready, authErrors, caHosts, ca, connect))
 }
 
 const realOpenssh = (wiring: CaWiring, caEntry: CaEntry, agent: string, host: HostEntry): Openssh => {
@@ -188,6 +196,7 @@ type CaPool = Readonly<{ host: string; agent: string; pool: Pool; openssh: Opens
 const makeRunner = (
   fleet: Fleet,
   resolved: ReadonlyArray<{ name: string; sshConfig: ConnectConfig }>,
+  authErrors: ReadonlyArray<readonly [string, string]>,
   caHosts: ReadonlyArray<HostEntry>,
   ca: Option<CaWiring>,
   connect?: ConnectFactory,
@@ -213,7 +222,7 @@ const makeRunner = (
     return pool
   }
 
-  const route = (host: string, command: string, agent: string): Promise<CommandResult> =>
+  const routeConnected = (host: string, command: string, agent: string): Promise<CommandResult> =>
     caHostByName.get(host).fold(
       () => sshPool.run(host, command),
       (h) =>
@@ -223,7 +232,18 @@ const makeRunner = (
         ),
     )
 
-  const lastErrors = new globalThis.Map<string, HostError>()
+  const authErrorByName = Map.of(...authErrors.map(([name, msg]): [string, string] => [name, msg]))
+
+  const route = (host: string, command: string, agent: string): Promise<CommandResult> =>
+    authErrorByName.get(host).fold(
+      () => routeConnected(host, command, agent),
+      (msg) => Promise.reject(new Error(msg)),
+    )
+
+  const startedAt = new Date().toISOString()
+  const lastErrors = new globalThis.Map<string, HostError>(
+    authErrors.map(([name, message]): [string, HostError] => [name, { message, at: startedAt }]),
+  )
 
   // A rejection is a connect or transport failure; a non-zero exit code resolves and isn't one.
   // Only configured hosts are recorded, so unknown names can't grow the map.
@@ -261,7 +281,11 @@ const makeRunner = (
               : `unknown host "${host}" — configured: ${[...names].join(", ")}`,
           ),
     exec: (host, command, agent) => runOn(host, command, agent),
-    status: () => [...sshPool.status(), ...caStatus()],
+    status: () => [
+      ...sshPool.status(),
+      ...authErrors.map(([name]): HostStatus => ({ name, state: "disconnected", inFlight: 0 })),
+      ...caStatus(),
+    ],
     lastError: (host) => Option(lastErrors.get(host)),
     // Pools first (closes connections), then every master is awaited, and only then is the CA
     // agent stopped and the runtime dir removed.
