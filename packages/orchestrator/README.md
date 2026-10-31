@@ -20,6 +20,7 @@ Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) and the shared `@ssh
 - [Audit Log](#audit-log)
 - [CA Mode](#ca-mode)
 - [Client Setup](#client-setup)
+- [Running on Several Machines](#running-on-several-machines)
 - [Command Line](#command-line)
 - [Development](#development)
 
@@ -425,6 +426,79 @@ Or via `npx` once published, with an explicit config (which must already exist):
 ```
 
 Set `SSH_FLEET_CONFIG` in your environment (or the MCP client's `env` block) if you prefer the env-var discovery path over an explicit `--config` flag. In CA mode, give each client its own config and `runtime_dir`.
+
+## Running on Several Machines
+
+A machine that runs this server and logs in to fleet hosts is a **hub**. Each hub keeps its own config (`~/.config/ssh-fleet/fleet.toml`), its own audit log, and its own credentials.
+
+### Where to register the server
+
+Register it in the MCP config of the folder you start admin sessions from (for example `~/homebase/.mcp.json`), not in your user-wide config. Only sessions started there get fleet access. Claude Code asks you to approve a folder's servers the first time; until then `claude mcp list` shows `⏸ Pending approval`.
+
+Use full paths. An MCP client launched from a GUI may not have Homebrew's `PATH`, and the package's `#!/usr/bin/env node` needs `node` on it:
+
+```json
+{
+  "mcpServers": {
+    "ssh-fleet": {
+      "command": "/opt/homebrew/bin/node",
+      "args": ["/opt/homebrew/bin/ssh-fleet-mcp-server"]
+    }
+  }
+}
+```
+
+### Installing before an npm release
+
+Until `ssh-fleet-mcp-server` is on npm, pack it on a machine with this repo and install the tarball on the hub:
+
+```sh
+cd packages/orchestrator && pnpm build && pnpm pack   # → ssh-fleet-mcp-server-<version>.tgz
+npm install -g ./ssh-fleet-mcp-server-<version>.tgz   # on the hub
+```
+
+`npm uninstall -g ssh-fleet-mcp-server` removes it. A later npm release replaces it the same way.
+
+### Credentials: one key per hub and host
+
+Start with a separate key for each hub and host it logs in to:
+
+```sh
+ssh-keygen -t ed25519 -N "" -C ssh-fleet@<hub> -f ~/.ssh/fleet_<host>   # on the hub
+```
+
+On the host, add the public key to the fleet account's `~/.ssh/authorized_keys`, limited to the hub's address and with forwarding turned off:
+
+```
+from="<hub address>",no-port-forwarding,no-agent-forwarding,no-X11-forwarding ssh-ed25519 AAAA… ssh-fleet@<hub>
+```
+
+Then `key = "~/.ssh/fleet_<host>"` in the hub's config, and `ssh-fleet-mcp-server check` on the hub. To cut off one hub, delete its line on each host; the other hubs keep working. The cost grows with the fleet: three hubs and five hosts is fifteen lines to add and remove.
+
+### Why not one key in a password manager
+
+A password manager's SSH agent (1Password, Bitwarden) can serve one key to every hub through `agent = true`, but it fits a fleet server badly:
+
+- **It needs the app running and unlocked,** and it may ask you to approve each use. A server that starts with your MCP client, or restarts on its own, can't answer.
+- **Claude Desktop doesn't pass `SSH_AUTH_SOCK`.** An `agent = true` host there fails every call (and `fleet_setup` says why).
+- **One shared key widens the damage.** A compromised hub exposes every host, and revoking the key cuts off every hub.
+
+### Centralizing: CA mode
+
+To manage access in one place, use [CA Mode](#ca-mode) instead:
+
+- **One CA key; each host trusts it once,** with one `cert-authority` line in a root-owned authorized-keys file. Each hub signs itself a 10-minute certificate per connection.
+- **Adding a hub doesn't touch the hosts.** The new hub gets a working copy of the CA key.
+- **Keep the canonical copy in your password manager,** and give each hub its working copy once (see [The CA key at boot](#the-ca-key-at-boot)). No hub needs the password manager unlocked at runtime.
+- **The config becomes shareable.** When every host uses `ca`, `fleet.toml` holds no secrets and no per-machine key paths, so a dotfiles manager can sync one copy to every hub.
+
+Two limits: enrolling a host needs root once, and only one server can run per `runtime_dir`, so two sessions on one hub need separate configs.
+
+### macOS hosts
+
+- **Turn on Remote Login** (System Settings → General → Sharing).
+- **`tmux_*` tools find Homebrew's tmux** without setup (see [`tmux_list`](#tmux_list)).
+- **`exec` gets a bare `PATH`** (`/usr/bin:/bin:/usr/sbin:/sbin`): a command sent over SSH runs in a non-login zsh, which doesn't read `~/.zprofile`. For Homebrew tools through `exec`, add `eval "$(/opt/homebrew/bin/brew shellenv)"` to the host's `~/.zshenv`.
 
 ## Command Line
 

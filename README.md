@@ -30,6 +30,8 @@ This repository is a pnpm monorepo with three packages:
 | `packages/connector` | `ssh-client-mcp-server` | Single-host MCP server (the original package). `exec` + `tmux_*` tools for one configured SSH host. |
 | `packages/orchestrator` | `ssh-fleet-mcp-server` | Multi-host fleet MCP server. Host-routed `exec` + `tmux_*` tools driven by a TOML fleet config. |
 
+For the fleet server, start with [its README](packages/orchestrator/README.md): first run, `fleet_setup`, audit log, policy, CA mode, and [running on several machines](packages/orchestrator/README.md#running-on-several-machines) (where to register it, installing before an npm release, per-hub keys versus CA mode, macOS hosts).
+
 Run the full validation suite across all packages:
 
 ```bash
