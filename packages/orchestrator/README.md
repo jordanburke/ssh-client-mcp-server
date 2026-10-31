@@ -149,6 +149,8 @@ Use `password_env` pointing at an environment variable instead. This keeps secre
 
 All tools except `hosts_list` and `fleet_setup` require a `host` parameter — the logical name of a configured fleet host (from `[[hosts]].name`). An unknown name raises an error immediately, before any SSH attempt.
 
+The server also has somamcp's `info` tool. It reports the name, version and build: the short commit it was built from (with `-dirty` when the tree had uncommitted changes), the branch and the build date. Use it to tell which build a hub runs.
+
 ### `hosts_list`
 
 List configured fleet hosts and their live connection-pool status.

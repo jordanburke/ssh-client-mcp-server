@@ -32,6 +32,7 @@ import {
   excerpt,
   openAuditLog,
 } from "./audit.js"
+import { buildInfo } from "./build-info.js"
 import { checkRuntimeDir, readCheckConfig, runCheck } from "./check.js"
 import { isEntryPoint } from "./entry.js"
 import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
@@ -382,6 +383,7 @@ async function main(): Promise<void> {
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,
+    build: buildInfo(),
     instructions:
       "Manage a fleet of SSH hosts: pooled connections, host-routed exec and tmux tools. " +
       "Call fleet_setup first if hosts_list is empty or a host fails to connect; it says what to configure next.",
