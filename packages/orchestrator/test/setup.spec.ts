@@ -358,8 +358,45 @@ key = "/k"
     )
   })
 
+  it("a changed config's syntax error never echoes its source lines", () => {
+    const broken = '[[hosts]]\nname = "a"\nhost = "h"\npassword = hunter2-SECRET\n'
+    const r = setupReport(contextFor("", { readConfig: () => Right(broken) }), runnerWith(), {})
+    expect(JSON.stringify(r)).not.toContain("hunter2")
+    expect(r.config.errors_on_disk).toContain("line 4")
+  })
+
   it("a config that can't be read now is reported", () => {
     const r = setupReport(contextFor(twoHosts, { readConfig: () => Left("ENOENT: no such file") }), runnerWith(), {})
     expect(r.config).toMatchObject({ changed_since_start: true, errors_on_disk: "ENOENT: no such file" })
+  })
+})
+
+describe("connections match hosts_list", () => {
+  const two = `
+[[hosts]]
+name = "a"
+host = "h"
+key = "/k"
+[[hosts]]
+name = "b"
+host = "h"
+key = "/k"
+`
+  const err = { message: "connect ECONNREFUSED", at: "2026-10-31T00:00:00.000Z" }
+  const runner: Pick<FleetRunner, "status" | "lastError"> = {
+    status: () => [
+      { name: "a", state: "idle", inFlight: 0 },
+      { name: "b", state: "disconnected", inFlight: 0 },
+    ],
+    // a's error is stale: it has an open connection, so its row stays idle.
+    lastError: () => Option(err),
+  }
+
+  it("a failed host's connection row reads error; an open one keeps its state", () => {
+    const r = setupReport(contextFor(two), runner, {})
+    expect(r.hosts.map((h) => h.connections)).toEqual([
+      [{ name: "a", state: "idle", inFlight: 0 }],
+      [{ name: "b", state: "error", inFlight: 0, last_error: err }],
+    ])
   })
 })

@@ -7,7 +7,7 @@ import { Either, Left, type Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
 
 import { type AuthKind, type CaEntry, type Fleet, type HostEntry, parseFleet } from "./fleet.js"
-import { type FleetRunner, type HostError } from "./runners.js"
+import { type FleetRunner, type HostError, type HostRow, hostRows } from "./runners.js"
 import { FLEET_TEMPLATE } from "./template.js"
 
 export type ConfigPath = Readonly<{ path: string; explicit: boolean }>
@@ -111,8 +111,6 @@ export type SetupContext = Readonly<{
   knownHosts: Option<string>
 }>
 
-type ConnectionRow = ReturnType<FleetRunner["status"]>[number]
-
 export type HostReport = Readonly<{
   name: string
   address: string
@@ -121,7 +119,7 @@ export type HostReport = Readonly<{
   env_set?: boolean
   ca?: string
   principal?: string
-  connections: ReadonlyArray<ConnectionRow>
+  connections: ReadonlyArray<HostRow>
   last_error?: HostError
   enroll_line?: string
 }>
@@ -187,7 +185,7 @@ const hostReport = (
       () => ({}),
       (name) => ({ ca: name, principal: principal.orElse("") }),
     ),
-    connections: runner.status().filter((row) => row.name === h.name || row.name.startsWith(`${h.name} (`)),
+    connections: hostRows(runner).filter((row) => row.name === h.name || row.name.startsWith(`${h.name} (`)),
     ...runner.lastError(h.name).fold(
       () => ({}),
       (e) => ({ last_error: e }),

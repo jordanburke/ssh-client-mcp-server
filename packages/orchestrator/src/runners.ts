@@ -41,6 +41,27 @@ export type FleetRunner = Readonly<{
 
 export type HostError = Readonly<{ message: string; at: string }>
 
+export type HostRow = Readonly<{
+  name: string
+  state: HostStatus["state"] | "error"
+  inFlight: number
+  last_error?: HostError
+}>
+
+// The rows hosts_list and fleet_setup show. "disconnected" only means no open connection, which is
+// normal before the first call. A host whose last call failed for a connection reason (refused,
+// auth, a busy pool's acquire timeout) reads "error" with the reason, until its next success. A CA
+// host's rows are named "<host> (<agent>)"; host names can't contain a space.
+export const hostRows = (runner: Pick<FleetRunner, "status" | "lastError">): ReadonlyArray<HostRow> =>
+  runner.status().map((row): HostRow =>
+    row.state !== "disconnected"
+      ? row
+      : runner.lastError(row.name.split(" ")[0]).fold<HostRow>(
+          () => row,
+          (e) => ({ ...row, state: "error", last_error: e }),
+        ),
+  )
+
 // What CA hosts need at runtime. `openFor` replaces the real OpenSSH factory, for tests.
 export type CaWiring = Readonly<{
   custody: Custody
@@ -245,7 +266,8 @@ const makeRunner = (
     authErrors.map(([name, message]): [string, HostError] => [name, { message, at: startedAt }]),
   )
 
-  // A rejection is a connect or transport failure; a non-zero exit code resolves and isn't one.
+  // A rejection is a connection-level failure (connect, auth, transport, or a busy pool's acquire
+  // timeout); a non-zero exit code resolves and isn't one.
   // Only configured hosts are recorded, so unknown names can't grow the map.
   const runOn = (host: string, command: string, agent: string): Promise<CommandResult> =>
     route(host, command, agent).then(

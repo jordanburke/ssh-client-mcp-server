@@ -13,12 +13,18 @@ const git = (...args: string[]): string | undefined => {
 
 // The short commit, plus "-dirty" when the tree has uncommitted changes. Not `git describe`: the
 // repo's tags (v1.5.1, …) are the connector's versions, not this server's.
+// "Dirty" means tracked changes in what this build bundles: this package and ../core.
 const sha = git("rev-parse", "--short=12", "HEAD")
-const dirty = git("status", "--porcelain") !== undefined
+const dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", "../core") !== undefined
+
+// CI checks out a detached HEAD, where `rev-parse --abbrev-ref` prints "HEAD"; fall back to the
+// branch GitHub Actions names (the PR's source branch, else the pushed branch or tag).
+const env = (name: string): string | undefined => process.env[name] || undefined
+const branch = git("symbolic-ref", "-q", "--short", "HEAD") ?? env("GITHUB_HEAD_REF") ?? env("GITHUB_REF_NAME")
 
 const stamp = {
   commit: sha && (dirty ? `${sha}-dirty` : sha),
-  branch: git("rev-parse", "--abbrev-ref", "HEAD"),
+  branch,
   date: new Date().toISOString(),
 }
 

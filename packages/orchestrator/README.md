@@ -162,9 +162,9 @@ Returns a JSON array of `{ name, state, inFlight }` objects, where `inFlight` is
 - `"connected"`: a pooled connection is open and running a command.
 - `"idle"`: a pooled connection is open and waiting.
 - `"disconnected"`: no open connection. This is normal: hosts connect on their first call and close after `idle_timeout_ms`.
-- `"error"`: no open connection, and the last attempt failed. The row adds `last_error: { message, at }`.
+- `"error"`: no open connection, and the last call failed for a connection reason: refused, auth, or a busy pool's `acquire_timeout_ms`. The row adds `last_error: { message, at }`, and stays `error` until the host's next successful call.
 
-A CA host has one row per agent, named `<host> (<agent>)`. If a host you added to the config is missing, the server started before the edit; `fleet_setup` says so.
+A CA host shows one row under its own name until its first call, then one row per agent, named `<host> (<agent>)`. If a host you added to the config is missing, the server started before the edit; `fleet_setup` says so.
 
 ### `fleet_setup`
 
@@ -189,7 +189,7 @@ Run a one-shot shell command on a fleet host over SSH.
 | `host`    | string | yes      | Configured host name.     |
 | `command` | string | yes      | Shell command to execute. |
 
-Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr (or stdout, when stderr is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0.
+Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0.
 
 ### `tmux_list`
 

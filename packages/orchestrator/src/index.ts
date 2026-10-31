@@ -9,7 +9,6 @@ import { dirname } from "node:path"
 import {
   checkOpenSsh,
   type CommandResult,
-  type HostStatus,
   nodeProcessRunner,
   socketPathFor,
   startCaCustody,
@@ -44,7 +43,7 @@ import {
   defaultKnownHosts,
   defaultRuntimeDir,
   type FleetRunner,
-  type HostError,
+  hostRows,
   selfTestCas,
 } from "./runners.js"
 import {
@@ -75,20 +74,14 @@ const noSummary = (): AuditFields => ({})
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 // Every call is checked against its host's policy and goes through the auditor: a decision line
 // before it runs, a result line after. A denied call writes its decision line and never runs.
-type HostRow = Readonly<{
-  name: string
-  state: HostStatus["state"] | "error"
-  inFlight: number
-  last_error?: HostError
-}>
-
-// A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. On success,
-// stderr follows stdout under a marker so warnings stay visible. A failure carries stderr, or stdout
-// when the command wrote nothing to stderr.
+// A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. Neither
+// stream is dropped. On success, stderr follows stdout under a marker so warnings stay visible. A
+// failure leads with stderr, the usual one-line reason, then stdout, which often holds the context.
 /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
 const execOutput = (host: string, r: CommandResult): string => {
-  if (r.code !== 0) throw new UserError(`[${host}] exit ${r.code}:\n${r.stderr || r.stdout}`)
-  return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
+  if (r.code === 0) return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
+  const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
+  throw new UserError(`[${host}] exit ${r.code}:\n${detail}`)
 }
 
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
@@ -122,24 +115,11 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
       ...(runner.logOutputFor(host) ? { stdout_excerpt: excerpt(r.stdout), stderr_excerpt: excerpt(r.stderr) } : {}),
     })
 
-  // "disconnected" only means no open connection, which is normal before the first call. A host
-  // whose last attempt failed reads "error" with the reason. A CA host's rows are named
-  // "<host> (<agent>)"; host names can't contain a space, so the host is everything before it.
-  const hostRows = (): ReadonlyArray<HostRow> =>
-    runner.status().map((row): HostRow =>
-      row.state !== "disconnected"
-        ? row
-        : runner.lastError(row.name.split(" ")[0]).fold<HostRow>(
-            () => row,
-            (e) => ({ ...row, state: "error", last_error: e }),
-          ),
-    )
-
   return {
     hostsList: (): Promise<string> =>
       auditor.audited(
         call("hosts_list", Option.none<string>(), ALLOW),
-        () => Promise.resolve(JSON.stringify(hostRows())),
+        () => Promise.resolve(JSON.stringify(hostRows(runner))),
         noSummary,
       ),
     fleetSetup: (): Promise<string> =>
