@@ -384,3 +384,15 @@ password_env = "FLEET_TEST_MINI_PW"
     expect(fleetWarnings(r.value)).toContain('host "mini": password_env FLEET_TEST_MINI_PW is not set')
   })
 })
+
+describe("TOML syntax errors", () => {
+  // smol-toml quotes the offending source lines; an inline secret there must not reach stderr or
+  // fleet_setup, which relays the error to the MCP client.
+  it("give the line and column, not the source text", () => {
+    const r = parseFleet('[[hosts]]\nname = "a"\nhost = "h"\npassword = hunter2-SECRET\n')
+    expect(r.isLeft()).toBe(true)
+    const msg = r.swap().orElse("")
+    expect(msg).toBe("Invalid TOML at line 4, column 12: Invalid TOML document: invalid value")
+    expect(msg).not.toContain("hunter2")
+  })
+})

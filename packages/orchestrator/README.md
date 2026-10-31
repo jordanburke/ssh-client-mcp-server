@@ -149,13 +149,22 @@ Use `password_env` pointing at an environment variable instead. This keeps secre
 
 All tools except `hosts_list` and `fleet_setup` require a `host` parameter — the logical name of a configured fleet host (from `[[hosts]].name`). An unknown name raises an error immediately, before any SSH attempt.
 
+The server also has somamcp's `info` tool. It reports the name, version and build: the short commit it was built from (with `-dirty` when the tree had uncommitted changes), the branch and the build date. Use it to tell which build a hub runs.
+
 ### `hosts_list`
 
 List configured fleet hosts and their live connection-pool status.
 
 Parameters: none.
 
-Returns a JSON array of `{ name, state, inFlight }` objects, where `state` is one of `"connected"`, `"idle"`, or `"disconnected"`, and `inFlight` is the count of currently active connections to that host.
+Returns a JSON array of `{ name, state, inFlight }` objects, where `inFlight` is the count of currently active connections to that host. `state` is one of:
+
+- `"connected"`: a pooled connection is open and running a command.
+- `"idle"`: a pooled connection is open and waiting.
+- `"disconnected"`: no open connection. This is normal: hosts connect on their first call and close after `idle_timeout_ms`.
+- `"error"`: no open connection, and the last call failed for a connection reason: refused, auth, or a busy pool's `acquire_timeout_ms`. The row adds `last_error: { message, at }`, and stays `error` until the host's next successful call.
+
+A CA host shows one row under its own name until its first call, then one row per agent, named `<host> (<agent>)`. If a host you added to the config is missing, the server started before the edit; `fleet_setup` says so.
 
 ### `fleet_setup`
 
@@ -165,8 +174,8 @@ Parameters: none.
 
 Returns JSON:
 
-- `config`: `{ path, created_this_start }`.
-- `next_steps`: what to do, in order: add a host, set a missing `password_env` variable, add a new CA's line on hosts, and each host's last connection error.
+- `config`: `{ path, created_this_start, changed_since_start }`. The server reads `fleet.toml` once, at start. When the file on disk differs, `config` adds `hosts_on_disk` (or `errors_on_disk`, if the new file doesn't parse), and the first next step says to reconnect the server.
+- `next_steps`: what to do, in order: reconnect after a config edit (or fix the edited file's errors), add a host, set a missing `password_env` variable, add a new CA's line on hosts, and each host's last connection error.
 - `hosts`: per host, `name`, `address` (`user@host:port`), `auth` (`password_env`, `key`, `key_env`, `agent` or `ca`), `connections` (the `hosts_list` rows for it), and when they apply `password_env` with `env_set` (never the value), `ca`, `principal`, `last_error` `{ message, at }`, and `enroll_line`.
 - `cas`: per CA, `name`, `key_source` (`key_cmd`, `key_env` or `key_file`; a `key_cmd` string is never shown), `key_file`, `created_this_start`, `public_key` and `enroll_line` (`cert-authority,principals="…" <public key>`).
 - `audit_log`, and in CA mode `runtime_dir` and `known_hosts`.
@@ -180,7 +189,7 @@ Run a one-shot shell command on a fleet host over SSH.
 | `host`    | string | yes      | Configured host name.     |
 | `command` | string | yes      | Shell command to execute. |
 
-Returns stdout. If the command exits non-zero and stderr is non-empty, the tool raises a `UserError` with the host name, exit code, and stderr text.
+Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0.
 
 ### `tmux_list`
 

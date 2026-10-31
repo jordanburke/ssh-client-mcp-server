@@ -44,6 +44,8 @@ const emptySetup = (configPath = "/cfg/fleet.toml"): SetupContext => ({
   configPath,
   configCreated: false,
   fleet: parseFleet("").orThrow(),
+  loadedConfig: "",
+  readConfig: () => Right(""),
   caPublicKeys: Map.of<string, string>(),
   caCreated: [],
   runtimeDir: Option.none(),
@@ -65,11 +67,80 @@ describe("orchestrator handlers", () => {
     expect(out[0]).toMatchObject({ name: "box-a", state: "idle" })
   })
 
+  it("hosts_list marks a host whose last connection failed as error, with the reason", async () => {
+    const { runner } = recording()
+    const err = { message: "connect ECONNREFUSED", at: "2026-10-31T00:00:00.000Z" }
+    const failing: FleetRunner = { ...runner, lastError: (host) => (host === "box-b" ? Option(err) : Option.none()) }
+    const out = JSON.parse(await withAudit(failing).h.hostsList())
+    expect(out).toEqual([
+      { name: "box-a", state: "idle", inFlight: 0 },
+      { name: "box-b", state: "error", inFlight: 0, last_error: err },
+    ])
+  })
+
+  it("hosts_list leaves a disconnected host with no error as disconnected", async () => {
+    const { runner } = recording()
+    const out = JSON.parse(await withAudit(runner).h.hostsList())
+    expect(out).toEqual([
+      { name: "box-a", state: "idle", inFlight: 0 },
+      { name: "box-b", state: "disconnected", inFlight: 0 },
+    ])
+  })
+
+  it("hosts_list matches a CA host's per-agent rows to the host's error", async () => {
+    const { runner } = recording()
+    const err = { message: "Permission denied", at: "2026-10-31T00:00:00.000Z" }
+    const ca: FleetRunner = {
+      ...runner,
+      status: () => [{ name: "nas (unknown)", state: "disconnected", inFlight: 0 }],
+      lastError: (host) => (host === "nas" ? Option(err) : Option.none()),
+    }
+    const out = JSON.parse(await withAudit(ca).h.hostsList())
+    expect(out).toEqual([{ name: "nas (unknown)", state: "error", inFlight: 0, last_error: err }])
+  })
+
   it("exec passes the agent to the runner", async () => {
     const { runner, agents } = recording()
     const { h } = withAudit(runner)
     await h.exec({ host: "box-a", command: "ls" })
     expect(agents).toEqual(["unknown"])
+  })
+
+  describe("exec results", () => {
+    const run = (result: CommandResult) => {
+      const { runner } = recording(result)
+      return withAudit(runner).h.exec({ host: "box-a", command: "x" })
+    }
+
+    it("exit 0 with stderr returns stdout and keeps the warning", async () => {
+      const out = await run({ stdout: "out\n", stderr: "warn\n", code: 0 })
+      expect(out).toBe("out\n\n[stderr]\nwarn\n")
+    })
+
+    it("exit 0 with no stderr returns stdout unchanged", async () => {
+      expect(await run({ stdout: "out\n", stderr: "", code: 0 })).toBe("out\n")
+    })
+
+    it("a non-zero exit is an error with the code and stderr", async () => {
+      await expect(run({ stdout: "", stderr: "denied\n", code: 1 })).rejects.toThrow("[box-a] exit 1:\ndenied")
+    })
+
+    it("a non-zero exit with stdout and stderr keeps both", async () => {
+      await expect(run({ stdout: "compiling…\n", stderr: "make: *** Error 2\n", code: 2 })).rejects.toThrow(
+        "[box-a] exit 2:\nmake: *** Error 2\n\n[stdout]\ncompiling…\n",
+      )
+    })
+
+    it("a non-zero exit is audited as a completed call with its code", async () => {
+      const { runner } = recording({ stdout: "", stderr: "nope\n", code: 5 })
+      const { h, parsed } = withAudit(runner)
+      await expect(h.exec({ host: "box-a", command: "x" })).rejects.toThrow("exit 5")
+      expect(parsed()[1]).toMatchObject({ event: "result", status: "ok", code: 5 })
+    })
+
+    it("a non-zero exit with no stderr is still an error, with stdout", async () => {
+      await expect(run({ stdout: "partial\n", stderr: "", code: 2 })).rejects.toThrow("[box-a] exit 2:\npartial")
+    })
   })
 
   it("exec routes the command to the named host", async () => {

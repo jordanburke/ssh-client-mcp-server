@@ -6,8 +6,8 @@ import { childEnv, type ProcessRunner } from "@ssh-mcp/core"
 import { Either, Left, type Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
 
-import { type AuthKind, type CaEntry, type Fleet, type HostEntry } from "./fleet.js"
-import { type FleetRunner, type HostError } from "./runners.js"
+import { type AuthKind, type CaEntry, type Fleet, type HostEntry, parseFleet } from "./fleet.js"
+import { type FleetRunner, type HostError, type HostRow, hostRows } from "./runners.js"
 import { FLEET_TEMPLATE } from "./template.js"
 
 export type ConfigPath = Readonly<{ path: string; explicit: boolean }>
@@ -101,14 +101,15 @@ export type SetupContext = Readonly<{
   configPath: string
   configCreated: boolean
   fleet: Fleet
+  // The config text loaded at start, and a way to read the file now, to notice edits made after start.
+  loadedConfig: string
+  readConfig: () => Either<string, string>
   // CA name → its public key line, as loaded into custody.
   caPublicKeys: Map<string, string>
   caCreated: ReadonlyArray<string>
   runtimeDir: Option<string>
   knownHosts: Option<string>
 }>
-
-type ConnectionRow = ReturnType<FleetRunner["status"]>[number]
 
 export type HostReport = Readonly<{
   name: string
@@ -118,7 +119,7 @@ export type HostReport = Readonly<{
   env_set?: boolean
   ca?: string
   principal?: string
-  connections: ReadonlyArray<ConnectionRow>
+  connections: ReadonlyArray<HostRow>
   last_error?: HostError
   enroll_line?: string
 }>
@@ -133,7 +134,13 @@ export type CaReport = Readonly<{
 }>
 
 export type SetupReport = Readonly<{
-  config: Readonly<{ path: string; created_this_start: boolean }>
+  config: Readonly<{
+    path: string
+    created_this_start: boolean
+    changed_since_start: boolean
+    hosts_on_disk?: number
+    errors_on_disk?: string
+  }>
   next_steps: ReadonlyArray<string>
   hosts: ReadonlyArray<HostReport>
   cas: ReadonlyArray<CaReport>
@@ -178,7 +185,7 @@ const hostReport = (
       () => ({}),
       (name) => ({ ca: name, principal: principal.orElse("") }),
     ),
-    connections: runner.status().filter((row) => row.name === h.name || row.name.startsWith(`${h.name} (`)),
+    connections: hostRows(runner).filter((row) => row.name === h.name || row.name.startsWith(`${h.name} (`)),
     ...runner.lastError(h.name).fold(
       () => ({}),
       (e) => ({ last_error: e }),
@@ -204,6 +211,37 @@ const caReport = (c: CaEntry, ctx: SetupContext): CaReport => {
   }
 }
 
+type Drift = Readonly<{
+  changed: boolean
+  fields: Readonly<{ changed_since_start: boolean; hosts_on_disk?: number; errors_on_disk?: string }>
+  step: ReadonlyArray<string>
+}>
+
+const RECONNECT = "reconnect the server to load it (in Claude Code: /mcp, then reconnect)"
+
+// The server reads fleet.toml once. An edit after start is invisible until a reconnect, so compare the
+// file now with the text loaded at start, and parse it to say what a reconnect would load.
+const configDrift = (ctx: SetupContext): Drift => {
+  const now = ctx.readConfig()
+  if (now.isRight() && now.value === ctx.loadedConfig)
+    return { changed: false, fields: { changed_since_start: false }, step: [] }
+  const parsed = now.flatMap(parseFleet)
+  return parsed.fold<Drift>(
+    (errors) => ({
+      changed: true,
+      fields: { changed_since_start: true, errors_on_disk: errors },
+      step: [`fleet.toml changed since the server started and now has errors; fix them before reconnecting: ${errors}`],
+    }),
+    (onDisk) => ({
+      changed: true,
+      fields: { changed_since_start: true, hosts_on_disk: onDisk.hosts.length },
+      step: [
+        `fleet.toml changed since the server started (${onDisk.hosts.length} hosts on disk, ${ctx.fleet.hosts.length} loaded): ${RECONNECT}.`,
+      ],
+    }),
+  )
+}
+
 // The fleet_setup tool's answer: what is configured, its live state, and what to do next.
 export const setupReport = (
   ctx: SetupContext,
@@ -212,8 +250,12 @@ export const setupReport = (
 ): SetupReport => {
   const hosts = ctx.fleet.hosts.map((h) => hostReport(h, ctx, runner, env))
   const cas = ctx.fleet.cas.map((c) => caReport(c, ctx))
+  const drift = configDrift(ctx)
   const nextSteps = [
-    ...(hosts.length === 0 ? [`Add a [[hosts]] entry to ${ctx.configPath}, then restart the server.`] : []),
+    ...drift.step,
+    ...(hosts.length === 0 && !drift.changed
+      ? [`Add a [[hosts]] entry to ${ctx.configPath}, then restart the server.`]
+      : []),
     ...hosts
       .filter((h) => h.env_set === false)
       .map((h) => `${h.name}: set ${h.password_env} in the MCP client's env for this server, then restart.`),
@@ -226,7 +268,7 @@ export const setupReport = (
     ...hosts.flatMap((h) => (h.last_error ? [`${h.name}: ${h.last_error.message}`] : [])),
   ]
   return {
-    config: { path: ctx.configPath, created_this_start: ctx.configCreated },
+    config: { path: ctx.configPath, created_this_start: ctx.configCreated, ...drift.fields },
     next_steps: nextSteps,
     hosts,
     cas,

@@ -173,9 +173,20 @@ const parseAudit = (raw: Record<string, unknown>): Either<string, AuditSettings>
   )
 }
 
+// smol-toml's message quotes the offending source lines, which can hold an inline secret, and
+// fleet_setup relays this text to the MCP client. Keep the location and the first line only.
+/** @interop smol-toml throws an Error carrying line and column fields. */
+const tomlError = (e: unknown): string => {
+  const err = e as Error & { line?: number; column?: number }
+  const summary = err.message.split("\n")[0]
+  return err.line === undefined
+    ? `Invalid TOML: ${summary}`
+    : `Invalid TOML at line ${err.line}, column ${err.column}: ${summary}`
+}
+
 export const parseFleet = (toml: string): Either<string, Fleet> => {
   const parsed = Try(() => parseToml(toml) as Record<string, unknown>)
-  if (parsed.isFailure()) return Left<string, Fleet>(`Invalid TOML: ${(parsed.error as Error).message}`)
+  if (parsed.isFailure()) return Left<string, Fleet>(tomlError(parsed.error))
   const raw = parsed.orThrow()
 
   const defaults = (raw.defaults ?? {}) as Record<string, unknown>

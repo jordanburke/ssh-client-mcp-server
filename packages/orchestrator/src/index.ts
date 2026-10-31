@@ -17,7 +17,7 @@ import {
   tmuxRead,
   tmuxSend,
 } from "@ssh-mcp/core"
-import { Either, Map, Option, Try } from "functype"
+import { Either, Left, Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
 import { createServer, UserError } from "somamcp"
 import { z } from "zod"
@@ -31,6 +31,7 @@ import {
   excerpt,
   openAuditLog,
 } from "./audit.js"
+import { buildInfo } from "./build-info.js"
 import { checkRuntimeDir, readCheckConfig, runCheck } from "./check.js"
 import { isEntryPoint } from "./entry.js"
 import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
@@ -42,6 +43,7 @@ import {
   defaultKnownHosts,
   defaultRuntimeDir,
   type FleetRunner,
+  hostRows,
   selfTestCas,
 } from "./runners.js"
 import {
@@ -72,6 +74,16 @@ const noSummary = (): AuditFields => ({})
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 // Every call is checked against its host's policy and goes through the auditor: a decision line
 // before it runs, a result line after. A denied call writes its decision line and never runs.
+// A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. Neither
+// stream is dropped. On success, stderr follows stdout under a marker so warnings stay visible. A
+// failure leads with stderr, the usual one-line reason, then stdout, which often holds the context.
+/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+const execOutput = (host: string, r: CommandResult): string => {
+  if (r.code === 0) return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
+  const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
+  throw new UserError(`[${host}] exit ${r.code}:\n${detail}`)
+}
+
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
   const call = (tool: string, host: Option<string>, verdict: Verdict, fields: AuditFields = {}): AuditCall => ({
     agent: AGENT_UNKNOWN,
@@ -107,7 +119,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
     hostsList: (): Promise<string> =>
       auditor.audited(
         call("hosts_list", Option.none<string>(), ALLOW),
-        () => Promise.resolve(JSON.stringify(runner.status())),
+        () => Promise.resolve(JSON.stringify(hostRows(runner))),
         noSummary,
       ),
     fleetSetup: (): Promise<string> =>
@@ -123,8 +135,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
         () => runner.exec(host, command, AGENT_UNKNOWN),
         summarizeExec(host),
       )
-      if (r.stderr) throw new UserError(`[${host}] Error (code ${r.code}):\n${r.stderr}`)
-      return r.stdout
+      return execOutput(host, r)
     },
     tmuxList: ({ host }: { host: string }): Promise<string> =>
       auditor.audited(
@@ -337,6 +348,12 @@ async function main(): Promise<void> {
     configPath,
     configCreated: config.created,
     fleet,
+    loadedConfig: raw,
+    readConfig: () =>
+      Try(() => readFileSync(configPath, "utf8")).fold(
+        (e) => Left<string, string>(`Cannot read ${configPath}: ${e.message}`),
+        (text) => Right<string, string>(text),
+      ),
     caPublicKeys: caPublicKeysOf(fleet, ca),
     caCreated,
     runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
@@ -346,6 +363,7 @@ async function main(): Promise<void> {
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,
+    build: buildInfo(),
     instructions:
       "Manage a fleet of SSH hosts: pooled connections, host-routed exec and tmux tools. " +
       "Call fleet_setup first if hosts_list is empty or a host fails to connect; it says what to configure next.",
@@ -355,7 +373,8 @@ async function main(): Promise<void> {
 
   server.addTool({
     name: "hosts_list",
-    description: "List configured fleet hosts and their live connection status.",
+    description:
+      "List configured fleet hosts and their live connection status. If a host you expect is missing, call fleet_setup: the config may have changed since the server started.",
     parameters: z.object({}),
     execute: () => h.hostsList(),
   })
