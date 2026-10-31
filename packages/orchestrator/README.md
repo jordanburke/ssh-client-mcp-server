@@ -459,7 +459,12 @@ Until `ssh-fleet-mcp-server` is on npm, pack it on a machine with this repo, cop
 ```sh
 cd packages/orchestrator && pnpm build && pnpm pack          # → ssh-fleet-mcp-server-<version>.tgz
 scp ssh-fleet-mcp-server-<version>.tgz <hub>:/tmp/
-ssh <hub> npm install -g /tmp/ssh-fleet-mcp-server-<version>.tgz
+```
+
+Then, in a terminal on the hub (not `ssh <hub> npm …`, which gets the bare `PATH` described under [macOS hosts](#macos-hosts) and won't find Homebrew's or nvm's `npm`):
+
+```sh
+npm install -g /tmp/ssh-fleet-mcp-server-<version>.tgz
 ```
 
 `npm uninstall -g ssh-fleet-mcp-server` removes it. A later npm release replaces it the same way.
