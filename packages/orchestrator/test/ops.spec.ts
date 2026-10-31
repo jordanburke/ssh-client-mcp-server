@@ -72,6 +72,30 @@ describe("orchestrator handlers", () => {
     expect(agents).toEqual(["unknown"])
   })
 
+  describe("exec results", () => {
+    const run = (result: CommandResult) => {
+      const { runner } = recording(result)
+      return withAudit(runner).h.exec({ host: "box-a", command: "x" })
+    }
+
+    it("exit 0 with stderr returns stdout and keeps the warning", async () => {
+      const out = await run({ stdout: "out\n", stderr: "warn\n", code: 0 })
+      expect(out).toBe("out\n\n[stderr]\nwarn\n")
+    })
+
+    it("exit 0 with no stderr returns stdout unchanged", async () => {
+      expect(await run({ stdout: "out\n", stderr: "", code: 0 })).toBe("out\n")
+    })
+
+    it("a non-zero exit is an error with the code and stderr", async () => {
+      await expect(run({ stdout: "", stderr: "denied\n", code: 1 })).rejects.toThrow("[box-a] exit 1:\ndenied")
+    })
+
+    it("a non-zero exit with no stderr is still an error, with stdout", async () => {
+      await expect(run({ stdout: "partial\n", stderr: "", code: 2 })).rejects.toThrow("[box-a] exit 2:\npartial")
+    })
+  })
+
   it("exec routes the command to the named host", async () => {
     const { runner, calls } = recording()
     const { h } = withAudit(runner)

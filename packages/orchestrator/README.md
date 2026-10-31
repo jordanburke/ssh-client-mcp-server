@@ -180,7 +180,7 @@ Run a one-shot shell command on a fleet host over SSH.
 | `host`    | string | yes      | Configured host name.     |
 | `command` | string | yes      | Shell command to execute. |
 
-Returns stdout. If the command exits non-zero and stderr is non-empty, the tool raises a `UserError` with the host name, exit code, and stderr text.
+Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr (or stdout, when stderr is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0.
 
 ### `tmux_list`
 

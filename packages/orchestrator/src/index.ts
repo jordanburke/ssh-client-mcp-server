@@ -72,6 +72,15 @@ const noSummary = (): AuditFields => ({})
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 // Every call is checked against its host's policy and goes through the auditor: a decision line
 // before it runs, a result line after. A denied call writes its decision line and never runs.
+// A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. On success,
+// stderr follows stdout under a marker so warnings stay visible. A failure carries stderr, or stdout
+// when the command wrote nothing to stderr.
+/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+const execOutput = (host: string, r: CommandResult): string => {
+  if (r.code !== 0) throw new UserError(`[${host}] exit ${r.code}:\n${r.stderr || r.stdout}`)
+  return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
+}
+
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
   const call = (tool: string, host: Option<string>, verdict: Verdict, fields: AuditFields = {}): AuditCall => ({
     agent: AGENT_UNKNOWN,
@@ -123,8 +132,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
         () => runner.exec(host, command, AGENT_UNKNOWN),
         summarizeExec(host),
       )
-      if (r.stderr) throw new UserError(`[${host}] Error (code ${r.code}):\n${r.stderr}`)
-      return r.stdout
+      return execOutput(host, r)
     },
     tmuxList: ({ host }: { host: string }): Promise<string> =>
       auditor.audited(
