@@ -183,7 +183,9 @@ Returns stdout. If the command exits non-zero and stderr is non-empty, the tool 
 
 ### `tmux_list`
 
-List tmux sessions on a fleet host. Returns a JSON array of session names.
+List tmux sessions on a fleet host. Returns a JSON array of session names, empty when no tmux server is running.
+
+The `tmux_*` tools find tmux on the host's `PATH`, then in `/opt/homebrew/bin` and `/usr/local/bin`. That covers Homebrew on macOS, where a command sent over SSH gets only `/usr/bin:/bin:/usr/sbin:/sbin`. `exec` gets no such help: to run other Homebrew tools through it, load Homebrew's `PATH` in the host's `~/.zshenv`.
 
 | Parameter | Type   | Required | Description           |
 | --------- | ------ | -------- | --------------------- |

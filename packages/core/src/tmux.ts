@@ -46,7 +46,15 @@ export const validateKey = (key: string): Either<string, string> =>
     ? Right<string, string>(key)
     : Left<string, string>(`Unsupported key "${key}": allowed keys are ${[...ALLOWED_KEYS].join(", ")}`)
 
-export const buildList = (): string => "tmux list-sessions -F '#{session_name}'"
+// A command sent over SSH runs in a non-login shell, so on macOS PATH is only
+// /usr/bin:/bin:/usr/sbin:/sbin and Homebrew's tmux (/opt/homebrew/bin, or /usr/local/bin on
+// Intel) isn't found. Appending keeps a tmux already on the host's PATH first. PATH is exported,
+// so the assignment reaches every tmux in the command.
+const TMUX_PATH = 'PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; '
+
+const withTmuxPath = (command: string): string => `${TMUX_PATH}${command}`
+
+export const buildList = (): string => withTmuxPath("tmux list-sessions -F '#{session_name}'")
 
 export const buildSend = (session: string, input: string, submit: boolean): Either<string, string> =>
   validateSession(session).map((s) => {
@@ -60,17 +68,19 @@ export const buildSend = (session: string, input: string, submit: boolean): Eith
     const ensure = `{ tmux has-session -t ${s} 2>/dev/null || tmux new-session -d -s ${s}; }`
     const send = `tmux send-keys -t ${s} -l -- ${shellQuote(input)}`
     const enter = submit ? ` && tmux send-keys -t ${s} Enter` : ""
-    return `${ensure} && ${send}${enter}`
+    return withTmuxPath(`${ensure} && ${send}${enter}`)
   })
 
 export const buildRead = (session: string, lines: number): Either<string, string> =>
-  validateSession(session).map((s) => `tmux capture-pane -t ${s} -p -J -S -${clampLines(lines)}`)
+  validateSession(session).map((s) => withTmuxPath(`tmux capture-pane -t ${s} -p -J -S -${clampLines(lines)}`))
 
 export const buildKeys = (session: string, keys: ReadonlyArray<string>): Either<string, string> =>
   validateSession(session).flatMap((s) => {
     if (keys.length === 0) return Left<string, string>("No keys provided")
     const bad = keys.find((k) => validateKey(k).isLeft())
-    return bad === undefined ? Right<string, string>(`tmux send-keys -t ${s} ${keys.join(" ")}`) : validateKey(bad)
+    return bad === undefined
+      ? Right<string, string>(withTmuxPath(`tmux send-keys -t ${s} ${keys.join(" ")}`))
+      : validateKey(bad)
   })
 
 const TMUX_MISSING_MSG =
@@ -79,6 +89,10 @@ const TMUX_MISSING_MSG =
 // tmux phrases a missing target differently per subcommand: send-keys says
 // "can't find session", capture-pane says "can't find pane". Match both.
 const SESSION_MISSING_RE = /can't find session|can't find pane|session not found/i
+
+// No sessions: "no server running" when the socket is stale, and "error connecting to <socket>
+// (No such file or directory)" when it doesn't exist yet (tmux 3.4 on Linux, 3.7c on macOS).
+const NO_SERVER_RE = /no server running|error connecting to \S+ \(No such file or directory\)/i
 
 export const isTmuxMissing = (r: CommandResult): boolean =>
   r.code === 127 || /tmux: ([Cc]ommand )?not found/i.test(r.stderr)
@@ -95,7 +109,7 @@ export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<st
         .filter((l) => l.length > 0),
     )
   }
-  if (/no server running/i.test(r.stderr)) return Right<string, ReadonlyArray<string>>([])
+  if (NO_SERVER_RE.test(r.stderr)) return Right<string, ReadonlyArray<string>>([])
   return Left<string, ReadonlyArray<string>>(failure("tmux list-sessions", r))
 }
 
