@@ -39,7 +39,6 @@
   },
   "prettier": "ts-builds/prettier",
   "dependencies": {
-    "@ssh-mcp/core": "workspace:*",
     "functype": "^1.16.0",
     "functype-os": "^1.16.0",
     "smol-toml": "^1.9.1",
@@ -48,6 +47,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@ssh-mcp/core": "workspace:*",
     "@types/node": "^24.19.2",
     "@types/ssh2": "^1.15.6",
     "ts-builds": "^4.0.0",
