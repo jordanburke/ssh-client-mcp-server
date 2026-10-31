@@ -5,7 +5,6 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { dirname } from "node:path"
-import { fileURLToPath } from "node:url"
 
 import {
   checkOpenSsh,
@@ -33,6 +32,7 @@ import {
   openAuditLog,
 } from "./audit.js"
 import { checkRuntimeDir, readCheckConfig, runCheck } from "./check.js"
+import { isEntryPoint } from "./entry.js"
 import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
 import { ALLOW, evaluate, type PolicyRequest, type Verdict } from "./policy.js"
 import {
@@ -424,8 +424,8 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown())
 }
 
-// Only run when executed directly (not when imported by tests or other modules)
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Only run when executed directly or through npm's bin link, not when imported by tests.
+if (isEntryPoint(Option(process.argv[1]), import.meta.url)) {
   const entry = process.argv[2] === "check" ? checkMain : main
   entry().catch((error) => {
     console.error("Fatal error in main():", error)

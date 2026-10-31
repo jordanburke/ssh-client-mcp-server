@@ -8,7 +8,7 @@ This is a **pnpm monorepo** containing three packages:
 
 | Package | npm name | Role |
 | ------- | -------- | ---- |
-| `packages/core` | `@ssh-mcp/core` (private) | Shared SSH pool (`createPool`), tmux command builders (`tmuxList`/`tmuxSend`/`tmuxRead`/`tmuxKeys`), auth resolution (`resolveAuth`), and SSH exec helpers. Bundled into both servers; not published separately. |
+| `packages/core` | `@ssh-mcp/core` (private) | Shared SSH pool (`createPool`), tmux command builders (`tmuxList`/`tmuxSend`/`tmuxRead`/`tmuxKeys`), auth resolution (`resolveAuth`), and SSH exec helpers. Bundled into both servers; not published separately, so it must stay a `devDependency` of each (`test/package.spec.ts` guards this). |
 | `packages/connector` | `ssh-client-mcp-server` | Single-host MCP server — `exec` + `tmux_*` tools for one SSH host, configured via CLI flags. |
 | `packages/orchestrator` | `ssh-fleet-mcp-server` | Multi-host fleet MCP server — `hosts_list`, `fleet_setup` + host-routed `exec`/`tmux_*` tools and a `check` subcommand, driven by a TOML fleet config (`--config=` flag or `SSH_FLEET_CONFIG` env or `~/.config/ssh-fleet/fleet.toml`). |
 
@@ -63,6 +63,7 @@ Multi-host fleet MCP server. Entry point: `src/index.ts`.
 - **`audit.ts`** — `createAuditor` writes a `decision` JSONL line before each tool call and a `result` line after; `openAuditLog` opens the `[audit].path` file (mode `0600`) and fails startup if it can't be written.
 - **`template.ts`** — `FLEET_TEMPLATE`, the all-comments starter config; `test/template.spec.ts` checks every example block parses once uncommented.
 - **`setup.ts`** — first-start steps and setup reporting: `resolveConfigPath`, `ensureConfig` (creates the template at the default path only), `ensureCaKeyFiles` (creates a missing CA `key_file`), `setupReport` (the `fleet_setup` answer; never includes a password value or `key_cmd` string).
+- **`entry.ts`** — `isEntryPoint`: runs `main()` only when this module is the program, comparing real paths so npm's `node_modules/.bin` symlink (npx, global installs) counts.
 - **`check.ts`** — `runCheck` for the `check` subcommand: runs `true` on every host as the operator (policy skipped, audited with `bypass: "policy"`), using its own `<runtime_dir>-check`.
 - **`src/index.ts`** — `makeHandlers` + server wiring, and `check` dispatch. Registers `hosts_list`, `fleet_setup` (read-only, no params), `exec`, `tmux_list`, `tmux_send`, `tmux_read`, `tmux_keys` (all but the first two with a required `host` param). Config and key creation run only in `main()` before the server starts; no tool writes.
 - **Config discovery**: `--config=<path>` → `SSH_FLEET_CONFIG` env → `~/.config/ssh-fleet/fleet.toml`. Only the default path is created on first start; a missing explicit path fails startup. Zero hosts is a valid config.
