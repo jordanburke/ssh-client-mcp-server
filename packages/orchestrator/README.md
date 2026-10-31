@@ -155,7 +155,14 @@ List configured fleet hosts and their live connection-pool status.
 
 Parameters: none.
 
-Returns a JSON array of `{ name, state, inFlight }` objects, where `state` is one of `"connected"`, `"idle"`, or `"disconnected"`, and `inFlight` is the count of currently active connections to that host.
+Returns a JSON array of `{ name, state, inFlight }` objects, where `inFlight` is the count of currently active connections to that host. `state` is one of:
+
+- `"connected"`: a pooled connection is open and running a command.
+- `"idle"`: a pooled connection is open and waiting.
+- `"disconnected"`: no open connection. This is normal: hosts connect on their first call and close after `idle_timeout_ms`.
+- `"error"`: no open connection, and the last attempt failed. The row adds `last_error: { message, at }`.
+
+A CA host has one row per agent, named `<host> (<agent>)`. If a host you added to the config is missing, the server started before the edit; `fleet_setup` says so.
 
 ### `fleet_setup`
 

@@ -65,6 +65,29 @@ describe("orchestrator handlers", () => {
     expect(out[0]).toMatchObject({ name: "box-a", state: "idle" })
   })
 
+  it("hosts_list marks a host whose last connection failed as error, with the reason", async () => {
+    const { runner } = recording()
+    const err = { message: "connect ECONNREFUSED", at: "2026-10-31T00:00:00.000Z" }
+    const failing: FleetRunner = { ...runner, lastError: (host) => (host === "box-b" ? Option(err) : Option.none()) }
+    const out = JSON.parse(await withAudit(failing).h.hostsList())
+    expect(out).toEqual([
+      { name: "box-a", state: "idle", inFlight: 0 },
+      { name: "box-b", state: "error", inFlight: 0, last_error: err },
+    ])
+  })
+
+  it("hosts_list matches a CA host's per-agent rows to the host's error", async () => {
+    const { runner } = recording()
+    const err = { message: "Permission denied", at: "2026-10-31T00:00:00.000Z" }
+    const ca: FleetRunner = {
+      ...runner,
+      status: () => [{ name: "nas (unknown)", state: "disconnected", inFlight: 0 }],
+      lastError: (host) => (host === "nas" ? Option(err) : Option.none()),
+    }
+    const out = JSON.parse(await withAudit(ca).h.hostsList())
+    expect(out).toEqual([{ name: "nas (unknown)", state: "error", inFlight: 0, last_error: err }])
+  })
+
   it("exec passes the agent to the runner", async () => {
     const { runner, agents } = recording()
     const { h } = withAudit(runner)
