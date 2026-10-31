@@ -437,7 +437,7 @@ A machine that runs this server and logs in to fleet hosts is a **hub**. Each hu
 
 Register it in the MCP config of a folder you start admin sessions from (for example `~/admin/.mcp.json`), not in your user-wide config. Only sessions started there get fleet access. Claude Code asks you to approve a folder's servers the first time; until then `claude mcp list` shows them as pending approval.
 
-In CA mode, two Claude Code sessions started in that folder load the same config, so the second session's server fails on the `runtime_dir` lock. Start the second one from another folder, or with `claude --mcp-config <file>` pointing at a config with its own `runtime_dir`.
+In CA mode, two Claude Code sessions started in that folder load the same config, so the second session's server fails on the `runtime_dir` lock. Start the second one from another folder, or with `claude --strict-mcp-config --mcp-config <file>`, where `<file>` starts the server with a `--config` that has its own `runtime_dir`. Without `--strict-mcp-config`, the folder's `.mcp.json` still loads and its server still collides.
 
 Use full paths. An MCP client launched from a GUI may not have Homebrew's `PATH`, and the package's `#!/usr/bin/env node` needs `node` on it. On an Apple silicon Mac with Homebrew (`/usr/local/bin` on Intel):
 
