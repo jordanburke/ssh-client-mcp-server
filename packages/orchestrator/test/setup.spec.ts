@@ -15,7 +15,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { nodeProcessRunner, type ProcessRunner } from "@ssh-mcp/core"
-import { Map, Option } from "functype"
+import { Left, Map, Option, Right } from "functype"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { type CaEntry, type CaKeyRef, parseFleet } from "../src/fleet.js"
@@ -180,6 +180,8 @@ const contextFor = (toml: string, over: Partial<SetupContext> = {}): SetupContex
   configPath: "/cfg/fleet.toml",
   configCreated: false,
   fleet: parseFleet(toml).orThrow(),
+  loadedConfig: toml,
+  readConfig: () => Right(toml),
   caPublicKeys: Map.of<string, string>(),
   caCreated: [],
   runtimeDir: Option.none(),
@@ -201,7 +203,7 @@ key_file = "~/.local/state/ssh-fleet/ca-home"
 describe("setupReport", () => {
   it("an empty fleet says to add a host", () => {
     const r = setupReport(contextFor("", { configCreated: true }), runnerWith(), {})
-    expect(r.config).toEqual({ path: "/cfg/fleet.toml", created_this_start: true })
+    expect(r.config).toEqual({ path: "/cfg/fleet.toml", created_this_start: true, changed_since_start: false })
     expect(r.next_steps[0]).toBe("Add a [[hosts]] entry to /cfg/fleet.toml, then restart the server.")
   })
 
@@ -318,5 +320,46 @@ password_env = "MINI_PW"
     const r = setupReport(contextFor(pwHost), runnerWith({ mini: err }), { MINI_PW: "x" })
     expect(r.hosts[0].last_error).toEqual(err)
     expect(r.next_steps).toEqual(["mini: connect ECONNREFUSED"])
+  })
+})
+
+describe("config changed since start", () => {
+  const twoHosts = `
+[[hosts]]
+name = "a"
+host = "h"
+key = "/k"
+[[hosts]]
+name = "b"
+host = "h"
+key = "/k"
+`
+
+  it("an unchanged config is not flagged", () => {
+    const r = setupReport(contextFor(""), runnerWith(), {})
+    expect(r.config.changed_since_start).toBe(false)
+    expect(r.next_steps[0]).toBe("Add a [[hosts]] entry to /cfg/fleet.toml, then restart the server.")
+  })
+
+  it("hosts added after start say to reconnect, not to add a host", () => {
+    const r = setupReport(contextFor("", { readConfig: () => Right(twoHosts) }), runnerWith(), {})
+    expect(r.config).toMatchObject({ changed_since_start: true, hosts_on_disk: 2 })
+    expect(r.next_steps).toEqual([
+      "fleet.toml changed since the server started (2 hosts on disk, 0 loaded): reconnect the server to load it (in Claude Code: /mcp, then reconnect).",
+    ])
+  })
+
+  it("a changed config with errors says to fix them first", () => {
+    const r = setupReport(contextFor("", { readConfig: () => Right("[[hosts]]\nname = 1\n") }), runnerWith(), {})
+    expect(r.config.changed_since_start).toBe(true)
+    expect(r.config.errors_on_disk).toContain("Fleet config errors")
+    expect(r.next_steps[0]).toMatch(
+      /^fleet\.toml changed since the server started and now has errors; fix them before reconnecting:/,
+    )
+  })
+
+  it("a config that can't be read now is reported", () => {
+    const r = setupReport(contextFor(twoHosts, { readConfig: () => Left("ENOENT: no such file") }), runnerWith(), {})
+    expect(r.config).toMatchObject({ changed_since_start: true, errors_on_disk: "ENOENT: no such file" })
   })
 })

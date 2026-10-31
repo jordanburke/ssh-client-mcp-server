@@ -18,7 +18,7 @@ import {
   tmuxRead,
   tmuxSend,
 } from "@ssh-mcp/core"
-import { Either, Map, Option, Try } from "functype"
+import { Either, Left, Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
 import { createServer, UserError } from "somamcp"
 import { z } from "zod"
@@ -367,6 +367,12 @@ async function main(): Promise<void> {
     configPath,
     configCreated: config.created,
     fleet,
+    loadedConfig: raw,
+    readConfig: () =>
+      Try(() => readFileSync(configPath, "utf8")).fold(
+        (e) => Left<string, string>(`Cannot read ${configPath}: ${e.message}`),
+        (text) => Right<string, string>(text),
+      ),
     caPublicKeys: caPublicKeysOf(fleet, ca),
     caCreated,
     runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
@@ -385,7 +391,8 @@ async function main(): Promise<void> {
 
   server.addTool({
     name: "hosts_list",
-    description: "List configured fleet hosts and their live connection status.",
+    description:
+      "List configured fleet hosts and their live connection status. If a host you expect is missing, call fleet_setup: the config may have changed since the server started.",
     parameters: z.object({}),
     execute: () => h.hostsList(),
   })

@@ -172,8 +172,8 @@ Parameters: none.
 
 Returns JSON:
 
-- `config`: `{ path, created_this_start }`.
-- `next_steps`: what to do, in order: add a host, set a missing `password_env` variable, add a new CA's line on hosts, and each host's last connection error.
+- `config`: `{ path, created_this_start, changed_since_start }`. The server reads `fleet.toml` once, at start. When the file on disk differs, `config` adds `hosts_on_disk` (or `errors_on_disk`, if the new file doesn't parse), and the first next step says to reconnect the server.
+- `next_steps`: what to do, in order: reconnect after a config edit (or fix the edited file's errors), add a host, set a missing `password_env` variable, add a new CA's line on hosts, and each host's last connection error.
 - `hosts`: per host, `name`, `address` (`user@host:port`), `auth` (`password_env`, `key`, `key_env`, `agent` or `ca`), `connections` (the `hosts_list` rows for it), and when they apply `password_env` with `env_set` (never the value), `ca`, `principal`, `last_error` `{ message, at }`, and `enroll_line`.
 - `cas`: per CA, `name`, `key_source` (`key_cmd`, `key_env` or `key_file`; a `key_cmd` string is never shown), `key_file`, `created_this_start`, `public_key` and `enroll_line` (`cert-authority,principals="…" <public key>`).
 - `audit_log`, and in CA mode `runtime_dir` and `known_hosts`.

@@ -44,6 +44,8 @@ const emptySetup = (configPath = "/cfg/fleet.toml"): SetupContext => ({
   configPath,
   configCreated: false,
   fleet: parseFleet("").orThrow(),
+  loadedConfig: "",
+  readConfig: () => Right(""),
   caPublicKeys: Map.of<string, string>(),
   caCreated: [],
   runtimeDir: Option.none(),
