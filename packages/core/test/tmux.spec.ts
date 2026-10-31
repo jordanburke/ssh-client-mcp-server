@@ -89,9 +89,24 @@ describe("validateKey", () => {
   })
 })
 
+// Spelled out, not imported: the test pins the exact prefix sent to hosts.
+const TMUX_PATH = 'PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; '
+
+describe("tmux PATH", () => {
+  it("every tmux command also searches Homebrew and /usr/local, after the host's own PATH", () => {
+    const commands = [
+      buildList(),
+      buildSend("agent", "x", true).orElse(""),
+      buildRead("agent", 10).orElse(""),
+      buildKeys("agent", ["C-c"]).orElse(""),
+    ]
+    commands.forEach((c) => expect(c.startsWith(TMUX_PATH)).toBe(true))
+  })
+})
+
 describe("buildList", () => {
   it("requests one session name per line", () => {
-    expect(buildList()).toBe("tmux list-sessions -F '#{session_name}'")
+    expect(buildList()).toBe(`${TMUX_PATH}tmux list-sessions -F '#{session_name}'`)
   })
 })
 
@@ -101,7 +116,7 @@ describe("buildSend", () => {
     expect(r.isRight()).toBe(true)
     if (r.isRight()) {
       expect(r.value).toBe(
-        "{ tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent; } && " +
+        `${TMUX_PATH}{ tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent; } && ` +
           "tmux send-keys -t agent -l -- 'ls -la' && tmux send-keys -t agent Enter",
       )
     }
@@ -112,7 +127,7 @@ describe("buildSend", () => {
     expect(r.isRight()).toBe(true)
     if (r.isRight()) {
       expect(r.value).toBe(
-        "{ tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent; } && " +
+        `${TMUX_PATH}{ tmux has-session -t agent 2>/dev/null || tmux new-session -d -s agent; } && ` +
           "tmux send-keys -t agent -l -- 'partial'",
       )
     }
@@ -149,13 +164,13 @@ describe("buildRead", () => {
   it("captures the pane as plain text with clamped scrollback", () => {
     const r = buildRead("agent", 200)
     expect(r.isRight()).toBe(true)
-    if (r.isRight()) expect(r.value).toBe("tmux capture-pane -t agent -p -J -S -200")
+    if (r.isRight()) expect(r.value).toBe(`${TMUX_PATH}tmux capture-pane -t agent -p -J -S -200`)
   })
 
   it("clamps the line count", () => {
     const r = buildRead("agent", 99999)
     expect(r.isRight()).toBe(true)
-    if (r.isRight()) expect(r.value).toBe("tmux capture-pane -t agent -p -J -S -2000")
+    if (r.isRight()) expect(r.value).toBe(`${TMUX_PATH}tmux capture-pane -t agent -p -J -S -2000`)
   })
 
   it("propagates session validation failure", () => {
@@ -167,7 +182,7 @@ describe("buildKeys", () => {
   it("sends allowlisted keys to the session", () => {
     const r = buildKeys("agent", ["C-c"])
     expect(r.isRight()).toBe(true)
-    if (r.isRight()) expect(r.value).toBe("tmux send-keys -t agent C-c")
+    if (r.isRight()) expect(r.value).toBe(`${TMUX_PATH}tmux send-keys -t agent C-c`)
   })
 
   it("rejects an empty key list", () => {
@@ -218,6 +233,22 @@ describe("interpretList", () => {
     const r = interpretList(res({ code: 1, stderr: "no server running on /tmp/tmux-1000/default" }))
     expect(r.isRight()).toBe(true)
     if (r.isRight()) expect(r.value).toEqual([])
+  })
+
+  // tmux 3.4 (Linux) and 3.7c (macOS) both say this when the socket file doesn't exist yet.
+  it("returns an empty list when the tmux socket doesn't exist", () => {
+    for (const stderr of [
+      "error connecting to /tmp/tmux-1000/default (No such file or directory)",
+      "error connecting to /private/tmp/tmux-501/default (No such file or directory)",
+    ]) {
+      const r = interpretList(res({ code: 1, stderr }))
+      expect(r.isRight() && r.value).toEqual([])
+    }
+  })
+
+  it("still reports other connection errors", () => {
+    const r = interpretList(res({ code: 1, stderr: "error connecting to /tmp/tmux-1000/default (Permission denied)" }))
+    expect(r.isLeft()).toBe(true)
   })
 
   it("surfaces a tmux-missing error", () => {
@@ -281,7 +312,7 @@ describe("tmuxList (operation)", () => {
   it("runs list-sessions and parses names", async () => {
     const { runner, calls } = stubRunner({ stdout: "agent\n" })
     const r = await tmuxList(runner)
-    expect(calls).toEqual(["tmux list-sessions -F '#{session_name}'"])
+    expect(calls).toEqual([`${TMUX_PATH}tmux list-sessions -F '#{session_name}'`])
     if (r.isRight()) expect(r.value).toEqual(["agent"])
   })
 })
@@ -316,6 +347,6 @@ describe("tmuxKeys (operation)", () => {
     const { runner, calls } = stubRunner({ code: 0 })
     const r = await tmuxKeys(runner, { session: "agent", keys: ["C-c"] })
     expect(r.isRight()).toBe(true)
-    expect(calls).toEqual(["tmux send-keys -t agent C-c"])
+    expect(calls).toEqual([`${TMUX_PATH}tmux send-keys -t agent C-c`])
   })
 })
