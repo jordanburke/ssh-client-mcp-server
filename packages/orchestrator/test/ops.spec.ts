@@ -142,6 +142,12 @@ describe("orchestrator handlers", () => {
     it("a non-zero exit with no stderr is still an error, with stdout", async () => {
       await expect(run({ stdout: "partial\n", stderr: "", code: 2 })).rejects.toThrow("[box-a] exit 2:\npartial")
     })
+
+    it("a command a signal ended is an error that names the signal", async () => {
+      await expect(run({ stdout: "", stderr: "", code: 137, signal: "KILL" })).rejects.toThrow(
+        "[box-a] exit 137 (signal KILL):",
+      )
+    })
   })
 
   it("exec routes the command to the named host", async () => {

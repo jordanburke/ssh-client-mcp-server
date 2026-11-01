@@ -1,6 +1,7 @@
 import { Map } from "functype"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 
+import { channelResult } from "./ssh.js"
 import { type CommandResult } from "./tmux.js"
 
 export type PooledConnection = {
@@ -47,13 +48,8 @@ export const defaultConnect: ConnectFactory = (sshConfig) =>
               }
               const out: Buffer[] = []
               const errb: Buffer[] = []
-              // @types/ssh2 declares no args for "close"; at runtime ssh2 passes the exit code (null if signalled).
-              stream.on("close", (code: unknown) =>
-                res({
-                  stdout: Buffer.concat(out).toString(),
-                  stderr: Buffer.concat(errb).toString(),
-                  code: typeof code === "number" ? code : 0,
-                }),
+              stream.on("close", (code: unknown, signal: unknown) =>
+                res(channelResult(Buffer.concat(out).toString(), Buffer.concat(errb).toString(), code, signal)),
               )
               stream.on("data", (d: Buffer) => out.push(d))
               stream.stderr.on("data", (d: Buffer) => errb.push(d))

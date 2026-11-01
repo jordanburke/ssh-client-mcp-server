@@ -9,6 +9,7 @@ import { dirname } from "node:path"
 import {
   checkOpenSsh,
   type CommandResult,
+  execOutput,
   nodeProcessRunner,
   socketPathFor,
   startCaCustody,
@@ -75,16 +76,6 @@ const noSummary = (): AuditFields => ({})
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 // Every call is checked against its host's policy and goes through the auditor: a decision line
 // before it runs, a result line after. A denied call writes its decision line and never runs.
-// A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. Neither
-// stream is dropped. On success, stderr follows stdout under a marker so warnings stay visible. A
-// failure leads with stderr, the usual one-line reason, then stdout, which often holds the context.
-/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
-const execOutput = (host: string, r: CommandResult): string => {
-  if (r.code === 0) return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
-  const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
-  throw resultError(`[${host}] exit ${r.code}:\n${detail}`)
-}
-
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
   const call = (tool: string, host: Option<string>, verdict: Verdict, fields: AuditFields = {}): AuditCall => ({
     agent: AGENT_UNKNOWN,
@@ -111,6 +102,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
     (host: string) =>
     (r: CommandResult): AuditFields => ({
       code: r.code,
+      ...(r.signal === undefined ? {} : { signal: r.signal }),
       stdout_bytes: bytes(r.stdout),
       stderr_bytes: bytes(r.stderr),
       ...(runner.logOutputFor(host) ? { stdout_excerpt: excerpt(r.stdout), stderr_excerpt: excerpt(r.stderr) } : {}),
@@ -138,7 +130,12 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
           summarizeExec(host),
         )
         .catch(routedError(host))
-      return execOutput(host, r)
+      return execOutput(r).fold(
+        (failure) => {
+          throw resultError(`[${host}] ${failure}`)
+        },
+        (output) => output,
+      )
     },
     tmuxList: ({ host }: { host: string }): Promise<string> =>
       auditor

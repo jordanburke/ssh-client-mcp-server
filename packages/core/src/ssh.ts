@@ -1,37 +1,44 @@
+import { constants } from "node:os"
+
+import { type Either, Left, Option, Right } from "functype"
 import { UserError } from "somamcp"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 
 import { type CommandResult } from "./tmux.js"
 
-export const execSshCommand = (sshConfig: ConnectConfig, command: string): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const conn = new SSHClient()
-    conn.on("ready", () => {
-      conn.exec(command, (err, stream) => {
-        if (err) {
-          reject(new UserError(`SSH exec error: ${err.message}`))
-          conn.end()
-          return
-        }
-        const stdoutChunks: Buffer[] = []
-        const stderrChunks: Buffer[] = []
-        stream.on("close", (code: number) => {
-          conn.end()
-          const stdout = Buffer.concat(stdoutChunks).toString()
-          const stderr = Buffer.concat(stderrChunks).toString()
-          if (stderr) {
-            reject(new UserError(`Error (code ${code}):\n${stderr}`))
-          } else {
-            resolve(stdout)
-          }
-        })
-        stream.on("data", (data: Buffer) => stdoutChunks.push(data))
-        stream.stderr.on("data", (data: Buffer) => stderrChunks.push(data))
-      })
-    })
-    conn.on("error", (err) => reject(new UserError(`SSH connection error: ${err.message}`)))
-    conn.connect(sshConfig)
-  })
+// A signal number differs by OS only for rarer signals; KILL, TERM, INT and HUP match everywhere.
+const signalCode = (signal: string): number =>
+  Option((constants.signals as Readonly<Record<string, number>>)[`SIG${signal}`]).fold(
+    () => 255,
+    (n) => 128 + n,
+  )
+
+/**
+ * The result of an ssh2 channel from its "close" arguments.
+ * @interop ssh2 passes (code, signal) to "close" but @types/ssh2 declares none; code is null when
+ * a signal ended the command, and signal is its name without "SIG".
+ */
+export const channelResult = (stdout: string, stderr: string, code: unknown, signal: unknown): CommandResult => {
+  if (typeof code === "number") return { stdout, stderr, code }
+  const name = typeof signal === "string" && signal !== "" ? signal : "unknown"
+  return { stdout, stderr, code: signalCode(name), signal: name }
+}
+
+/** "exit 1", or "exit 137 (signal KILL)". */
+export const exitLabel = (r: CommandResult): string =>
+  r.signal === undefined ? `exit ${r.code}` : `exit ${r.code} (signal ${r.signal})`
+
+/**
+ * What `exec` returns for a finished command. A non-zero exit is the failure signal, not stderr:
+ * many tools warn on stderr and exit 0. Neither stream is dropped. On success, stderr follows
+ * stdout under a marker so warnings stay visible. A failure leads with the exit label and stderr,
+ * the usual one-line reason, then stdout, which often holds the context.
+ */
+export const execOutput = (r: CommandResult): Either<string, string> => {
+  if (r.code === 0) return Right(r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout)
+  const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
+  return Left(`${exitLabel(r)}:\n${detail}`)
+}
 
 export const execSshResult = (sshConfig: ConnectConfig, command: string): Promise<CommandResult> =>
   new Promise((resolve, reject) => {
@@ -45,14 +52,11 @@ export const execSshResult = (sshConfig: ConnectConfig, command: string): Promis
         }
         const stdoutChunks: Buffer[] = []
         const stderrChunks: Buffer[] = []
-        // @types/ssh2 declares no args for "close"; at runtime ssh2 passes the exit code (null if signalled).
-        stream.on("close", (code: unknown) => {
+        stream.on("close", (code: unknown, signal: unknown) => {
           conn.end()
-          resolve({
-            stdout: Buffer.concat(stdoutChunks).toString(),
-            stderr: Buffer.concat(stderrChunks).toString(),
-            code: typeof code === "number" ? code : 0,
-          })
+          resolve(
+            channelResult(Buffer.concat(stdoutChunks).toString(), Buffer.concat(stderrChunks).toString(), code, signal),
+          )
         })
         stream.on("data", (data: Buffer) => stdoutChunks.push(data))
         stream.stderr.on("data", (data: Buffer) => stderrChunks.push(data))

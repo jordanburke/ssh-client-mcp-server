@@ -1,6 +1,7 @@
 import { type Either, Left, Right } from "functype"
 
-export type CommandResult = Readonly<{ stdout: string; stderr: string; code: number }>
+/** `signal` is set when a signal ended the command; `code` is then 128 + the signal number, as a shell reports it. */
+export type CommandResult = Readonly<{ stdout: string; stderr: string; code: number; signal?: string }>
 
 export type TmuxRunner = (command: string) => Promise<CommandResult>
 

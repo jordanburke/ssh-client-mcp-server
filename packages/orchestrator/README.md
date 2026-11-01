@@ -200,7 +200,7 @@ Run a one-shot shell command on a fleet host over SSH.
 | `host`    | string | yes      | Configured host name.     |
 | `command` | string | yes      | Shell command to execute. |
 
-Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0.
+Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0. A command a signal ended (an OOM kill, `kill -9`) fails as 128 plus the signal number, with the name: `exit 137 (signal KILL)`; the audit result line records `signal` beside `code`.
 
 ### `tmux_list`
 

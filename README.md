@@ -47,7 +47,7 @@ No global install required — `npx` fetches and runs the latest published versi
 
 ## Features
 
-- **Single `exec` tool** — runs a shell command on the remote host, returns stdout. stderr surfaces as a structured error.
+- **Single `exec` tool** — runs a shell command on the remote host. A non-zero exit is the failure; a command that exits 0 succeeds even if it wrote to stderr, and its stderr follows stdout under a `[stderr]` marker. A failure reads `exit <code>:` then stderr, then stdout under `[stdout]`; a command a signal ended reads `exit 137 (signal KILL)`.
 - **Four auth modes** — password, key file, key from environment variable (e.g. injected by [envpkt](https://github.com/jordanburke/envpkt), Vault, Doppler), or `SSH_AUTH_SOCK` (system ssh-agent, 1Password, Bitwarden Desktop, KeePassXC).
 - **Smart path expansion** — `--key` supports `~`, `$VAR`, `${VAR}`, and relative paths via [`functype-os`](https://github.com/jordanburke/functype-os). Unresolved variables fail fast with a typed error.
 - **OS-user fallback** — `--user` defaults to the current OS username when omitted.
@@ -59,7 +59,7 @@ No global install required — `npx` fetches and runs the latest published versi
 
 | Tool                | Description                                                         |
 | ------------------- | ------------------------------------------------------------------- |
-| `exec`              | Execute a shell command on the remote SSH server and return stdout. |
+| `exec`              | Execute a shell command on the remote SSH server and return its output. |
 | `info`              | Server name, version, runtime, and registered tool counts.          |
 
 ### Persistent sessions (tmux)
