@@ -28,6 +28,8 @@ import {
   type AuditCall,
   type AuditFields,
   type Auditor,
+  CLIENT_LABEL_ENV,
+  clientLabel,
   createAuditor,
   excerpt,
   openAuditLog,
@@ -382,7 +384,8 @@ async function main(): Promise<void> {
     runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
     knownHosts: ca.map((wiring) => wiring.knownHosts),
   }
-  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID }), setup)
+  const client = clientLabel(process.env[CLIENT_LABEL_ENV]).orUndefined()
+  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID, client }), setup)
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,

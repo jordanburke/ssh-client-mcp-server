@@ -316,6 +316,7 @@ What each tool records:
 - **`status`** is `"ok"` when the call completed (an `exec` with a non-zero exit is still `"ok"`, with its `code`) and `"error"` with an `error` message when it didn't, for example an unknown host.
 - **`decision`** is `"allow"` or `"deny"`. **`rule`** names the policy rule that decided, qualified by host (`box-a:readonly`); it is absent when no policy applies (`hosts_list`, an unknown host). A deny line also has a **`reason`**.
 - **`agent`** is `"unknown"` until per-agent identity lands.
+- **`client`** appears when the server's environment sets `SSH_FLEET_CLIENT`, a label for whoever launched it (for example `claude-code@mac-mini`): at most 64 characters, control characters removed. Set it in the client's MCP config `env` block. It tells clients apart in the log; it is configuration, not a verified identity, so policy's `agents` never matches it.
 - **No unaudited calls.** The server refuses to start if the log can't be written, and a call whose audit line can't be written fails.
 - **The file is reopened for every line,** so a deleted or rotated log is recreated at mode `0600`. A symlink at the audit path is refused rather than followed.
 - **Append-only is best effort** — the server's user can truncate its own file. For stronger integrity, set the OS append-only flag from an administrator account: `sudo chattr +a <file>` (Linux) or `sudo chflags uappend <file>` (macOS). Rotation is out of scope.

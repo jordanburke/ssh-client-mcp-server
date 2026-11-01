@@ -1,7 +1,7 @@
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync, writeSync } from "node:fs"
 import { dirname } from "node:path"
 
-import { type Either, Left, type Option, Right, Try, type Wire } from "functype"
+import { type Either, Left, Option, Right, Try, type Wire } from "functype"
 import { Path } from "functype-os"
 import { UserError } from "somamcp"
 
@@ -30,7 +30,25 @@ export type Auditor = Readonly<{
   audited: <A>(call: AuditCall, run: () => Promise<A>, summarize: (a: A) => AuditFields) => Promise<A>
 }>
 
-export type AuditDeps = Readonly<{ sink: AuditSink; now: () => Date; newId: () => string }>
+// `client` is the label the operator gave this server's client (SSH_FLEET_CLIENT). It is recorded
+// beside `agent`, never in its place: it is configuration the client can set, not a verified identity,
+// so policy never sees it.
+export type AuditDeps = Readonly<{ sink: AuditSink; now: () => Date; newId: () => string; client?: string }>
+
+export const CLIENT_LABEL_ENV = "SSH_FLEET_CLIENT"
+
+/**
+ * A label from the environment: trimmed, control characters removed, at most 64 characters; empty means none.
+ * @interop takes a process.env value, which is string | undefined.
+ */
+export const clientLabel = (raw: string | undefined): Option<string> =>
+  Option(raw)
+    .map((v) =>
+      Array.from(v.replace(/\p{Cc}/gu, "").trim())
+        .slice(0, 64)
+        .join(""),
+    )
+    .filter((v) => v.length > 0)
 
 // The first EXCERPT_CHARS code points, so a surrogate pair is never split.
 export const excerpt = (s: string): string => Array.from(s).slice(0, EXCERPT_CHARS).join("")
@@ -56,7 +74,7 @@ const verdictFields = (call: AuditCall): Readonly<Record<string, string>> =>
     : { decision: "deny", rule: qualify(call.host, call.verdict.rule), reason: call.verdict.reason }
 
 /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
-export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
+export const createAuditor = ({ sink, now, newId, client }: AuditDeps): Auditor => {
   const write = (line: Readonly<Record<string, unknown>>, failure: string): void =>
     Try(() => sink(JSON.stringify(line))).fold(
       (e) => {
@@ -77,6 +95,7 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
     const id = newId()
     const who = {
       agent: call.agent,
+      ...(client === undefined ? {} : { client }),
       tool: call.tool,
       ...call.host.fold(
         () => ({}),

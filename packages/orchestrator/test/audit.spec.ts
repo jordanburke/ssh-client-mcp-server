@@ -6,7 +6,15 @@ import { Option } from "functype"
 import { UserError } from "somamcp"
 import { afterEach, describe, expect, it } from "vitest"
 
-import { AGENT_UNKNOWN, type AuditCall, type AuditSink, createAuditor, excerpt, openAuditLog } from "../src/audit.js"
+import {
+  AGENT_UNKNOWN,
+  type AuditCall,
+  type AuditSink,
+  clientLabel,
+  createAuditor,
+  excerpt,
+  openAuditLog,
+} from "../src/audit.js"
 import { ALLOW, type Verdict } from "../src/policy.js"
 
 const clock = () => {
@@ -207,6 +215,38 @@ describe("createAuditor", () => {
     )
     expect("host" in JSON.parse(lines[0])).toBe(false)
     expect("host" in JSON.parse(lines[1])).toBe(false)
+  })
+})
+
+describe("client label", () => {
+  it("records the client beside agent on both lines, and agent stays unknown", async () => {
+    const { lines, sink } = memory()
+    const auditor = createAuditor({ sink, now: clock(), newId: () => "id-1", client: "claude-code@mac-mini" })
+    await auditor.audited(
+      execCall,
+      async () => ({ code: 0 }),
+      () => ({}),
+    )
+    lines.forEach((line) => {
+      expect(JSON.parse(line)).toMatchObject({ agent: "unknown", client: "claude-code@mac-mini" })
+    })
+  })
+
+  it("leaves client out when none is set", async () => {
+    const { lines, sink } = memory()
+    await auditorWith(sink).audited(
+      execCall,
+      async () => ({ code: 0 }),
+      () => ({}),
+    )
+    expect(JSON.parse(lines[0])).not.toHaveProperty("client")
+  })
+
+  it("cleans the environment value", () => {
+    expect(clientLabel(undefined).isNone()).toBe(true)
+    expect(clientLabel("   ").isNone()).toBe(true)
+    expect(clientLabel(" desk\u0007top \n").orElse("")).toBe("desktop")
+    expect(clientLabel("x".repeat(100)).orElse("")).toHaveLength(64)
   })
 })
 
