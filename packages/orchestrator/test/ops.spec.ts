@@ -460,6 +460,12 @@ describe("error labels", () => {
     expect(e.category).toBe("timeout")
   })
 
+  it("a finished command whose output mentions a timeout is execution, not timeout", async () => {
+    const { runner } = recording({ stdout: "", stderr: "request to api timed out after 5000 ms", code: 1 })
+    const e = await caught(withAudit(runner).h.exec({ host: "box-a", command: "curl api" }))
+    expect(e.category).toBe("execution")
+  })
+
   it("a busy pool is timeout", async () => {
     const { h } = withAudit(throwing('host "box-a" busy: no free connection slot after 30000ms'))
     const e = await caught(h.exec({ host: "box-a", command: "true" }))

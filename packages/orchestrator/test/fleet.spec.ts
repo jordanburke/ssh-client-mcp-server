@@ -257,6 +257,15 @@ ca = "home"
     expect(bad('max_per_host = "2"')).toContain("pool.max_per_host must be")
   })
 
+  it("reports every bad [pool] key at once", () => {
+    const e = parseFleet(`[pool]\nmax_per_host = 0\nexec_timeout_ms = 0\n${base}`).fold(
+      (m) => m,
+      () => "",
+    )
+    expect(e).toContain("pool.max_per_host must be")
+    expect(e).toContain("pool.exec_timeout_ms must be")
+  })
+
   it("reads exec timeouts from [pool]", () => {
     const r = parseFleet(`[pool]\nexec_timeout_ms = 5000\nmax_exec_timeout_ms = 9000\n${base}`)
     if (r.isLeft()) throw new Error(r.value)

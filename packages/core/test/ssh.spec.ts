@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { channelResult, execOutput } from "../src/ssh.js"
-import { exitLabel, interpretAck, isTimedOutMessage } from "../src/tmux.js"
+import { exitLabel, interpretAck, interpretList, isTimedOutMessage } from "../src/tmux.js"
 
 const failure = (e: ReturnType<typeof execOutput>): string =>
   e.fold(
@@ -52,11 +52,21 @@ describe("timeouts", () => {
     )
     expect(msg).toBe("tmux send-keys timed out after 5000 ms")
     expect(isTimedOutMessage(msg)).toBe(true)
-    expect(isTimedOutMessage(exitLabel(timedOut))).toBe(true)
   })
 
-  it("other failures are not timeouts", () => {
+  it("a failure whose output mentions a timeout is not a timeout", () => {
     expect(isTimedOutMessage("tmux send-keys failed: exit 1")).toBe(false)
+    expect(isTimedOutMessage("tmux_send failed: request timed out after 5000 ms")).toBe(false)
+    expect(isTimedOutMessage("[box-a] exit 1:\nrequest to api timed out after 5000 ms")).toBe(false)
+  })
+
+  it("a timeout wins over partial stderr that looks like no server", () => {
+    const r = { stdout: "", stderr: "no server running on /tmp/tmux-1/default", code: 124, timedOutMs: 5000 }
+    const msg = interpretList(r).fold(
+      (m) => m,
+      () => "listed",
+    )
+    expect(msg).toBe("tmux list-sessions timed out after 5000 ms")
   })
 })
 

@@ -68,7 +68,7 @@ Default values applied to every host that does not override them.
 
 ### `[pool]` (optional)
 
-Controls the shared per-host connection pool. Every value is a whole number from 1 to 2147483647 (about 24.8 days in ms); anything else fails startup. There is no value that turns a timeout off.
+Controls the shared per-host connection pool. Each key below that is set must be a whole number from 1 to 2147483647, or startup fails; for the `_ms` keys that limit is about 24.8 days. There is no value that turns a timeout off.
 
 | Key                   | Type | Default   | Description                                                                                         |
 | --------------------- | ---- | --------- | --------------------------------------------------------------------------------------------------- |

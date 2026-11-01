@@ -115,23 +115,31 @@ const poolValue = (p: Record<string, unknown>, key: string, fallback: number): E
     : Left<string, number>(`pool.${key} must be a whole number from 1 to ${MAX_TIMER_MS}`)
 }
 
-const parsePool = (raw: Record<string, unknown>): Either<string, PoolSettings> => {
+const parsePool = (raw: Record<string, unknown>): Either<ReadonlyArray<string>, PoolSettings> => {
   const p = (raw.pool ?? {}) as Record<string, unknown>
-  return poolValue(p, "max_per_host", 2).flatMap((maxPerHost) =>
-    poolValue(p, "idle_timeout_ms", 60000).flatMap((idleTimeoutMs) =>
-      poolValue(p, "acquire_timeout_ms", 30000).flatMap((acquireTimeoutMs) =>
-        poolValue(p, "exec_timeout_ms", DEFAULT_EXEC_TIMEOUT_MS).flatMap((execTimeoutMs) =>
-          poolValue(p, "max_exec_timeout_ms", DEFAULT_MAX_EXEC_TIMEOUT_MS).map((maxExecTimeoutMs) => ({
-            maxPerHost,
-            idleTimeoutMs,
-            acquireTimeoutMs,
-            execTimeoutMs,
-            maxExecTimeoutMs,
-          })),
-        ),
-      ),
+  const fields = [
+    poolValue(p, "max_per_host", 2),
+    poolValue(p, "idle_timeout_ms", 60000),
+    poolValue(p, "acquire_timeout_ms", 30000),
+    poolValue(p, "exec_timeout_ms", DEFAULT_EXEC_TIMEOUT_MS),
+    poolValue(p, "max_exec_timeout_ms", DEFAULT_MAX_EXEC_TIMEOUT_MS),
+  ] as const
+  const errors = fields.flatMap((f) =>
+    f.fold(
+      (e) => [e],
+      () => [],
     ),
   )
+  const [maxPerHost, idleTimeoutMs, acquireTimeoutMs, execTimeoutMs, maxExecTimeoutMs] = fields.map((f) => f.orElse(0))
+  return errors.length > 0
+    ? Left<ReadonlyArray<string>, PoolSettings>(errors)
+    : Right<ReadonlyArray<string>, PoolSettings>({
+        maxPerHost,
+        idleTimeoutMs,
+        acquireTimeoutMs,
+        execTimeoutMs,
+        maxExecTimeoutMs,
+      })
 }
 
 const validPrincipal = (p: string): boolean => p.length > 0 && !p.includes(",")
@@ -301,7 +309,11 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
       (errs) => [...errs],
       () => [],
     ),
-    ...[pool, audit, ...results].flatMap((r) =>
+    ...pool.fold(
+      (errs) => [...errs],
+      () => [],
+    ),
+    ...[audit, ...results].flatMap((r) =>
       r.fold<string[]>(
         (msg) => [msg],
         () => [],
