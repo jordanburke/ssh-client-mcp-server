@@ -1,6 +1,17 @@
 import { type Either, Left, Right } from "functype"
 
-export type CommandResult = Readonly<{ stdout: string; stderr: string; code: number }>
+/**
+ * `signal` is set when a signal ended the command; `code` is then 128 + the signal number, as a shell
+ * reports it. `timedOutMs` is set when exec's timeout stopped waiting; `code` is then 124, as
+ * `timeout(1)` reports it, and stdout/stderr hold what arrived first.
+ */
+export type CommandResult = Readonly<{
+  stdout: string
+  stderr: string
+  code: number
+  signal?: string
+  timedOutMs?: number
+}>
 
 export type TmuxRunner = (command: string) => Promise<CommandResult>
 

@@ -9,6 +9,7 @@ import { dirname } from "node:path"
 import {
   checkOpenSsh,
   type CommandResult,
+  execOutput,
   nodeProcessRunner,
   socketPathFor,
   startCaCustody,
@@ -27,6 +28,8 @@ import {
   type AuditCall,
   type AuditFields,
   type Auditor,
+  CLIENT_LABEL_ENV,
+  clientLabel,
   createAuditor,
   excerpt,
   openAuditLog,
@@ -54,13 +57,13 @@ import {
   type SetupContext,
   setupReport,
 } from "./setup.js"
-import { resultError, routedError } from "./tool-errors.js"
+import { resultError, routedError, timeoutError } from "./tool-errors.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
 }
 
-/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
+/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
 const unwrap = <T>(result: Either<string, T>): T =>
   result.fold(
     (msg) => {
@@ -75,16 +78,6 @@ const noSummary = (): AuditFields => ({})
 // Tool handlers, factored out so they can be unit-tested with a fake FleetRunner.
 // Every call is checked against its host's policy and goes through the auditor: a decision line
 // before it runs, a result line after. A denied call writes its decision line and never runs.
-// A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. Neither
-// stream is dropped. On success, stderr follows stdout under a marker so warnings stay visible. A
-// failure leads with stderr, the usual one-line reason, then stdout, which often holds the context.
-/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
-const execOutput = (host: string, r: CommandResult): string => {
-  if (r.code === 0) return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
-  const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
-  throw resultError(`[${host}] exit ${r.code}:\n${detail}`)
-}
-
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
   const call = (tool: string, host: Option<string>, verdict: Verdict, fields: AuditFields = {}): AuditCall => ({
     agent: AGENT_UNKNOWN,
@@ -111,6 +104,8 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
     (host: string) =>
     (r: CommandResult): AuditFields => ({
       code: r.code,
+      ...(r.signal === undefined ? {} : { signal: r.signal }),
+      ...(r.timedOutMs === undefined ? {} : { timed_out_ms: r.timedOutMs }),
       stdout_bytes: bytes(r.stdout),
       stderr_bytes: bytes(r.stderr),
       ...(runner.logOutputFor(host) ? { stdout_excerpt: excerpt(r.stdout), stderr_excerpt: excerpt(r.stderr) } : {}),
@@ -129,16 +124,33 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
         () => Promise.resolve(JSON.stringify(setupReport(setup, runner))),
         noSummary,
       ),
-    /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
-    exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
+    /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
+    exec: async ({
+      host,
+      command,
+      timeout_ms,
+    }: {
+      host: string
+      command: string
+      timeout_ms?: number
+    }): Promise<string> => {
       const r = await auditor
         .audited(
-          gated(host, { tool: "exec", agent: AGENT_UNKNOWN, command }, { command }),
-          () => runner.exec(host, command, AGENT_UNKNOWN),
+          gated(
+            host,
+            { tool: "exec", agent: AGENT_UNKNOWN, command },
+            { command, ...(timeout_ms === undefined ? {} : { timeout_ms }) },
+          ),
+          () => runner.exec(host, command, AGENT_UNKNOWN, timeout_ms),
           summarizeExec(host),
         )
         .catch(routedError(host))
-      return execOutput(host, r)
+      return execOutput(r).fold(
+        (failure) => {
+          throw r.timedOutMs === undefined ? resultError(`[${host}] ${failure}`) : timeoutError(host, failure)
+        },
+        (output) => output,
+      )
     },
     tmuxList: ({ host }: { host: string }): Promise<string> =>
       auditor
@@ -372,7 +384,8 @@ async function main(): Promise<void> {
     runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
     knownHosts: ca.map((wiring) => wiring.knownHosts),
   }
-  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID }), setup)
+  const client = clientLabel(process.env[CLIENT_LABEL_ENV]).orUndefined()
+  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID, client }), setup)
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,
@@ -401,8 +414,19 @@ async function main(): Promise<void> {
   server.addTool({
     name: "exec",
     description: "Run a one-shot shell command on a fleet host over SSH.",
-    parameters: z.object({ host: hostParam, command: z.string().min(1).describe("Shell command") }),
-    execute: ({ host, command }) => h.exec({ host, command }),
+    parameters: z.object({
+      host: hostParam,
+      command: z.string().min(1).describe("Shell command"),
+      timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          `How long to wait, in ms. Default ${fleet.pool.execTimeoutMs}; at most ${fleet.pool.maxExecTimeoutMs}, and a larger value is lowered to it. On timeout the call fails with the output so far, and the command may still be running. For longer jobs, run them in tmux (tmux_send, then tmux_read).`,
+        ),
+    }),
+    execute: ({ host, command, timeout_ms }) => h.exec({ host, command, timeout_ms }),
   })
   server.addTool({
     name: "tmux_list",

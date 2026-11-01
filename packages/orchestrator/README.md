@@ -70,11 +70,13 @@ Default values applied to every host that does not override them.
 
 Controls the shared per-host connection pool.
 
-| Key                  | Type | Default | Description                                                       |
-| -------------------- | ---- | ------- | ----------------------------------------------------------------- |
-| `max_per_host`       | int  | `2`     | Maximum concurrent SSH connections per host.                      |
-| `idle_timeout_ms`    | int  | `60000` | Idle connection eviction interval (ms).                           |
-| `acquire_timeout_ms` | int  | `30000` | How long to wait for a pool slot before failing a tool call (ms). |
+| Key                   | Type | Default   | Description                                                                                         |
+| --------------------- | ---- | --------- | --------------------------------------------------------------------------------------------------- |
+| `max_per_host`        | int  | `2`       | Maximum concurrent SSH connections per host.                                                        |
+| `idle_timeout_ms`     | int  | `60000`   | Idle connection eviction interval (ms).                                                             |
+| `acquire_timeout_ms`  | int  | `30000`   | How long to wait for a pool slot before failing a tool call (ms).                                   |
+| `exec_timeout_ms`     | int  | `600000`  | How long `exec` and the `tmux_*` tools wait for a command when the call gives no `timeout_ms` (ms). |
+| `max_exec_timeout_ms` | int  | `3600000` | The most an `exec` call's `timeout_ms` may ask for; a larger value is lowered to it (ms).           |
 
 ### `[audit]` (optional)
 
@@ -156,8 +158,10 @@ A failed call is an error result the model can read, labelled with an `errorCate
 | `auth`          | The host's policy denied the call.                        | Use what the policy allows, or ask the operator. |
 | `not_found`     | No host by that name.                                     | Call `hosts_list`.                               |
 | `timeout`       | Every pooled connection to the host is busy.              | Try again, or raise `[pool].max_per_host`.       |
+| `timeout`       | `exec` ran past its timeout (message: `timed out after`). | Run it in tmux, or pass a larger `timeout_ms`.   |
 | `execution`     | The connection failed (message starts `[<host>]`).        | Call `fleet_setup`.                              |
 | `execution`     | The command exited non-zero, or tmux reported an error.   | None: the message carries the output.            |
+| `validation`    | A bad tmux argument: session name, key, or empty `keys`.  | None: the message names the argument.            |
 | `internal`      | The audit log can't be written, so every call is refused. | Check `[audit].path`.                            |
 
 The server also has somamcp's `info` tool. It reports the name, version and build: the short commit it was built from (with `-dirty` when the tree had uncommitted changes), the branch and the build date. Use it to tell which build a hub runs.
@@ -195,12 +199,22 @@ Returns JSON:
 
 Run a one-shot shell command on a fleet host over SSH.
 
-| Parameter | Type   | Required | Description               |
-| --------- | ------ | -------- | ------------------------- |
-| `host`    | string | yes      | Configured host name.     |
-| `command` | string | yes      | Shell command to execute. |
+| Parameter    | Type   | Required | Description                                                                                          |
+| ------------ | ------ | -------- | ---------------------------------------------------------------------------------------------------- |
+| `host`       | string | yes      | Configured host name.                                                                                |
+| `command`    | string | yes      | Shell command to execute.                                                                            |
+| `timeout_ms` | int    | no       | How long to wait (ms). Defaults to `[pool].exec_timeout_ms`, capped at `[pool].max_exec_timeout_ms`. |
 
-Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0.
+Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0. A command a signal ended (an OOM kill, `kill -9`) fails as 128 plus the signal number, with the name: `exit 137 (signal KILL)`; the audit result line records `signal` beside `code`.
+
+When the timeout runs out, the call fails with label `timeout` and the output so far: `[<host>] timed out after 5000 ms:` then stderr and stdout as above. The server stops waiting, sends the command `KILL`, and closes the channel. OpenSSH 7.9 and later deliver the signal; an older server ignores it, and the command keeps running until it next writes output. On a `ca` host, the server kills its local `ssh` client instead, with the same effect on the host. The audit result line records `timed_out_ms`. The `tmux_*` tools wait `[pool].exec_timeout_ms` too.
+
+#### Long jobs
+
+A package upgrade, an image pull, or a backup can outlive one call, and an upgrade of the network layer under the connection (a VPN daemon, `tailscaled`) can drop the SSH session partway. Don't hold the call open. Start the job somewhere that survives the session, then check on it:
+
+1. **tmux (preferred).** `tmux_send` starts the job in a session on the host, and `tmux_read` shows its progress. The tmux server outlives the SSH session, so a dropped connection doesn't stop the job, and every send and read goes through policy and the audit log. It needs tmux on the host and a `readwrite` host whose policy leaves `tmux` at its default, `"open"`: a `readonly` host refuses tmux input, and `tmux = "approve"` refuses it until approval exists.
+2. **A detached process.** On Linux, `systemd-run --user --unit=upgrade-1 <command>`, then `systemctl --user status upgrade-1` or `journalctl --user -u upgrade-1`. On macOS, `nohup <command> > /tmp/job.log 2>&1 & echo $! > /tmp/job.pid`, then `tail /tmp/job.log` and `kill -0 $(cat /tmp/job.pid)`. Start it with `exec`; check it with `exec`. Both use `>` or `&`, which a `readonly` policy rejects, so they need a `readwrite` host.
 
 ### `tmux_list`
 
@@ -302,6 +316,7 @@ What each tool records:
 - **`status`** is `"ok"` when the call completed (an `exec` with a non-zero exit is still `"ok"`, with its `code`) and `"error"` with an `error` message when it didn't, for example an unknown host.
 - **`decision`** is `"allow"` or `"deny"`. **`rule`** names the policy rule that decided, qualified by host (`box-a:readonly`); it is absent when no policy applies (`hosts_list`, an unknown host). A deny line also has a **`reason`**.
 - **`agent`** is `"unknown"` until per-agent identity lands.
+- **`client`** appears when the server's environment sets `SSH_FLEET_CLIENT`, a label for whoever launched it (for example `claude-code@mac-mini`): at most 64 characters, control characters removed. Set it in the client's MCP config `env` block. It tells clients apart in the log; it is configuration, not a verified identity, so policy's `agents` never matches it.
 - **No unaudited calls.** The server refuses to start if the log can't be written, and a call whose audit line can't be written fails.
 - **The file is reopened for every line,** so a deleted or rotated log is recreated at mode `0600`. A symlink at the audit path is refused rather than followed.
 - **Append-only is best effort** — the server's user can truncate its own file. For stronger integrity, set the OS append-only flag from an administrator account: `sudo chattr +a <file>` (Linux) or `sudo chflags uappend <file>` (macOS). Rotation is out of scope.

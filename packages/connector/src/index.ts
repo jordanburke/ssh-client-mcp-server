@@ -3,7 +3,7 @@
 import { createRequire } from "node:module"
 
 import {
-  execSshCommand,
+  execOutput,
   execSshResult,
   isTmuxInputError,
   tmuxKeys,
@@ -65,18 +65,7 @@ async function main() {
     instructions: "Execute shell commands on a remote host over SSH.",
   })
 
-  server.addTool({
-    name: "exec",
-    description: "Execute a shell command on the remote SSH server and return the output.",
-    parameters: z.object({
-      command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
-    }),
-    execute: async ({ command }) => execSshCommand(sshConfig, command),
-  })
-
-  const defaultSession = Option(argv["tmux-session"]).orElse("agent")
-  const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
-  /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
+  /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
   const unwrap = <T>(result: Either<string, T>): T =>
     result.fold(
       (msg) => {
@@ -84,6 +73,18 @@ async function main() {
       },
       (value) => value,
     )
+
+  server.addTool({
+    name: "exec",
+    description: "Execute a shell command on the remote SSH server and return the output.",
+    parameters: z.object({
+      command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
+    }),
+    execute: async ({ command }) => unwrap(execOutput(await execSshResult(sshConfig, command))),
+  })
+
+  const defaultSession = Option(argv["tmux-session"]).orElse("agent")
+  const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
 
   server.addTool({
     name: "tmux_list",

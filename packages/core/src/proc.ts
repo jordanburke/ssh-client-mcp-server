@@ -2,7 +2,8 @@ import { spawn as nodeSpawn } from "node:child_process"
 
 import { Try } from "functype"
 
-export type ProcResult = Readonly<{ code: number; stdout: string; stderr: string }>
+/** `timedOut` is set when `run`'s timeout killed the child; stdout and stderr then hold what it wrote first. */
+export type ProcResult = Readonly<{ code: number; stdout: string; stderr: string; timedOut?: true }>
 
 // The whole environment a child gets; never merged with process.env.
 export type Env = Readonly<Record<string, string>>
@@ -69,7 +70,12 @@ export const nodeProcessRunner: ProcessRunner = {
         () => {
           const { pid } = child
           if (pid !== undefined) Try(() => process.kill(-pid, "SIGKILL"))
-          finish({ code: -1, stdout: "", stderr: `timed out after ${timeoutMs ?? 0} ms` })
+          finish({
+            code: -1,
+            stdout: Buffer.concat(out).toString(),
+            stderr: Buffer.concat(err).toString(),
+            timedOut: true,
+          })
         },
         timeoutMs ?? 2 ** 31 - 1,
       )

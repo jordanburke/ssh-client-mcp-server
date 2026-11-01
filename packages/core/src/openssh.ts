@@ -7,6 +7,7 @@ import { type ConnectConfig } from "ssh2"
 import { type Minted } from "./ca.js"
 import { type ConnectFactory, type PooledConnection } from "./pool.js"
 import { type Child, childEnv, type ProcessRunner } from "./proc.js"
+import { timedOutResult } from "./ssh.js"
 
 // One factory serves one (agent, host). `socketPath` is a base: each master gets its own socket
 // beside it (`<base>-<4 hex>.sock`), so a new master never touches one that is still draining.
@@ -198,10 +199,12 @@ export const opensshConnect = (deps: OpensshDeps): Openssh => {
     child.onExit(() => live.delete(entry))
 
     const conn: PooledConnection = {
-      exec: async (command) => {
+      exec: async (command, opts = {}) => {
         if (child.exited() || state.closing || state.retired) throw new Error(`master for ${c.host} is gone`)
-        const r = await proc.run("ssh", execArgs(c, sock, command), { env: childEnv() })
-        return { stdout: r.stdout, stderr: r.stderr, code: r.code }
+        const r = await proc.run("ssh", execArgs(c, sock, command), { env: childEnv(), timeoutMs: opts.timeoutMs })
+        return r.timedOut === true
+          ? timedOutResult(r.stdout, r.stderr, opts.timeoutMs ?? 0)
+          : { stdout: r.stdout, stderr: r.stderr, code: r.code }
       },
       close,
       onClose: (cb) => {

@@ -10,7 +10,7 @@ import { createPool } from "../src/pool.js"
 import { type OpensshDeps, opensshConnect } from "../src/openssh.js"
 import { type Child, type Env, type ProcessRunner, type ProcResult } from "../src/proc.js"
 
-type Call = Readonly<{ cmd: string; args: ReadonlyArray<string>; env: Env }>
+type Call = Readonly<{ cmd: string; args: ReadonlyArray<string>; env: Env; timeoutMs?: number }>
 
 // A child whose exit the test fires; kill() exits it, as a real kill would.
 const fakeChild = (stderr = "") => {
@@ -41,8 +41,8 @@ const fakeProc = (
   const spawns: Array<Call & { fake: ReturnType<typeof fakeChild> }> = []
   const childStderr = { next: "" }
   const proc: ProcessRunner = {
-    run: async (cmd, args, { env }) => {
-      runs.push({ cmd, args, env })
+    run: async (cmd, args, { env, timeoutMs }) => {
+      runs.push({ cmd, args, env, timeoutMs })
       const op = args.indexOf("-O")
       if (op >= 0)
         return args[op + 1] === "check" ? (opts.check ?? (() => ok))() : { code: 255, stdout: "", stderr: "" }
@@ -133,6 +133,20 @@ describe("opensshConnect", () => {
       "uptime",
     ])
     expect(call?.env.SSH_AUTH_SOCK).toBeUndefined()
+  })
+
+  it("exec passes its timeout to ssh and reports a timeout with the output so far", async () => {
+    const { proc, runs } = fakeProc({
+      exec: async () => ({ code: -1, stdout: "part", stderr: "", timedOut: true }),
+    })
+    const conn = await opensshConnect(depsFor(proc, minted())).connect(sshConfig)
+    expect(await conn.exec("sleep 99", { timeoutMs: 250 })).toEqual({
+      stdout: "part",
+      stderr: "",
+      code: 124,
+      timedOutMs: 250,
+    })
+    expect(runs.find((r) => r.args.includes("sleep 99"))?.timeoutMs).toBe(250)
   })
 
   it("exec on a dead master rejects without spawning", async () => {

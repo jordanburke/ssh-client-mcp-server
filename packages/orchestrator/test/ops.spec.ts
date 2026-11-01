@@ -142,6 +142,12 @@ describe("orchestrator handlers", () => {
     it("a non-zero exit with no stderr is still an error, with stdout", async () => {
       await expect(run({ stdout: "partial\n", stderr: "", code: 2 })).rejects.toThrow("[box-a] exit 2:\npartial")
     })
+
+    it("a command a signal ended is an error that names the signal", async () => {
+      await expect(run({ stdout: "", stderr: "", code: 137, signal: "KILL" })).rejects.toThrow(
+        "[box-a] exit 137 (signal KILL):",
+      )
+    })
   })
 
   it("exec routes the command to the named host", async () => {
@@ -423,6 +429,28 @@ describe("error labels", () => {
     expect(e.message).toBe("[box-a] connect ECONNREFUSED 127.0.0.1:22")
     expect(e.category).toBe("execution")
     expect(e.suggestions).toEqual(["Call fleet_setup to see box-a's connection state and what to configure."])
+  })
+
+  it("a bug in the server is internal, not a connection failure", async () => {
+    const { runner } = recording()
+    const broken: FleetRunner = {
+      ...runner,
+      exec: async () => {
+        throw new TypeError("Cannot read properties of undefined (reading 'code')")
+      },
+    }
+    const e = await caught(withAudit(broken).h.exec({ host: "box-a", command: "true" }))
+    expect(e.category).toBe("internal")
+    expect(e.message).not.toContain("[box-a]")
+    expect(e.suggestions).toEqual([])
+  })
+
+  it("an exec timeout is timeout, keeps the output so far, and points at tmux", async () => {
+    const { runner } = recording({ stdout: "step 1\n", stderr: "", code: 124, timedOutMs: 5000 })
+    const e = await caught(withAudit(runner).h.exec({ host: "box-a", command: "upgrade", timeout_ms: 5000 }))
+    expect(e.category).toBe("timeout")
+    expect(e.message).toBe("[box-a] timed out after 5000 ms:\nstep 1\n")
+    expect(e.suggestions?.[0]).toMatch(/tmux_send/)
   })
 
   it("a busy pool is timeout", async () => {
