@@ -22,7 +22,7 @@
   "dependencies": {
     "functype": "^1.16.0",
     "functype-os": "^1.16.0",
-    "somamcp": "^1.4.1",
+    "somamcp": "^2.4.0",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {

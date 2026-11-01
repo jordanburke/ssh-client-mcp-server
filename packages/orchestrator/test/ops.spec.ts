@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { Left, Map, Option, Right } from "functype"
+import { UserError } from "somamcp"
 import { describe, expect, it } from "vitest"
 import { type CommandResult } from "@ssh-mcp/core"
 
@@ -370,5 +371,77 @@ describe("policy", () => {
     await expect(h.exec({ host: "z", command: "ls" })).rejects.toThrow(/unknown host/)
     expect(parsed()[0]).toMatchObject({ decision: "allow" })
     expect("rule" in parsed()[0]).toBe(false)
+  })
+})
+
+// The label and hints the client sees. somamcp guesses a plain Error's label from its words, which
+// once called an unknown host "internal" and told the model the maintainer should investigate.
+describe("error labels", () => {
+  const caught = async (p: Promise<unknown>): Promise<UserError> => {
+    const e = await p.then(
+      () => undefined,
+      (err: unknown) => err,
+    )
+    expect(e).toBeInstanceOf(UserError)
+    return e as UserError
+  }
+  const throwing = (message: string): FleetRunner => {
+    const { runner } = recording()
+    return {
+      ...runner,
+      exec: async () => {
+        throw new Error(message)
+      },
+      tmuxRunnerFor: () => Left(`unknown host "z" — configured: box-a, box-b`),
+    }
+  }
+
+  it("a policy denial is auth, with a hint that names the policy", async () => {
+    const { runner } = recording()
+    const { h } = withAudit(withPolicy(runner, { mode: "readonly" }))
+    const e = await caught(h.exec({ host: "box-a", command: "rm -rf /" }))
+    expect(e.category).toBe("auth")
+    expect(e.suggestions?.[0]).toMatch(/policy/)
+  })
+
+  it("an unknown host is not_found, pointing at hosts_list", async () => {
+    const { h } = withAudit(throwing('unknown host "z"'))
+    const e = await caught(h.exec({ host: "z", command: "true" }))
+    expect(e.category).toBe("not_found")
+    expect(e.suggestions).toEqual(["Call hosts_list for the configured host names."])
+  })
+
+  it("an unknown host on a tmux tool is not_found too", async () => {
+    const { h } = withAudit(throwing("x"))
+    const e = await caught(h.tmuxList({ host: "z" }))
+    expect(e.category).toBe("not_found")
+  })
+
+  it("a connection failure is execution, names the host, and points at fleet_setup", async () => {
+    const { h } = withAudit(throwing("connect ECONNREFUSED 127.0.0.1:22"))
+    const e = await caught(h.exec({ host: "box-a", command: "true" }))
+    expect(e.message).toBe("[box-a] connect ECONNREFUSED 127.0.0.1:22")
+    expect(e.category).toBe("execution")
+    expect(e.suggestions).toEqual(["Call fleet_setup to see box-a's connection state and what to configure."])
+  })
+
+  it("a busy pool is timeout", async () => {
+    const { h } = withAudit(throwing('host "box-a" busy: no free connection slot after 30000ms'))
+    const e = await caught(h.exec({ host: "box-a", command: "true" }))
+    expect(e.category).toBe("timeout")
+  })
+
+  it("a non-zero exit is execution with no hints: the command's own output explains it", async () => {
+    const { runner } = recording({ stdout: "", stderr: "nope\n", code: 1 })
+    const e = await caught(withAudit(runner).h.exec({ host: "box-a", command: "x" }))
+    expect(e.category).toBe("execution")
+    expect(e.suggestions).toEqual([])
+  })
+
+  it("a tmux result error keeps its message and is execution", async () => {
+    const { runner } = recording({ stdout: "", stderr: "tmux: command not found", code: 127 })
+    const e = await caught(withAudit(runner).h.tmuxList({ host: "box-a" }))
+    expect(e.message).toContain("tmux not found")
+    expect(e.category).toBe("execution")
   })
 })

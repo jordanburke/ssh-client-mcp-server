@@ -19,7 +19,7 @@ import {
 } from "@ssh-mcp/core"
 import { Either, Left, Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
-import { createServer, UserError } from "somamcp"
+import { createServer } from "somamcp/node"
 import { z } from "zod"
 
 import {
@@ -54,6 +54,7 @@ import {
   type SetupContext,
   setupReport,
 } from "./setup.js"
+import { resultError, routedError } from "./tool-errors.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -63,7 +64,7 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
 const unwrap = <T>(result: Either<string, T>): T =>
   result.fold(
     (msg) => {
-      throw new UserError(msg)
+      throw resultError(msg)
     },
     (value) => value,
   )
@@ -81,7 +82,7 @@ const noSummary = (): AuditFields => ({})
 const execOutput = (host: string, r: CommandResult): string => {
   if (r.code === 0) return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
   const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
-  throw new UserError(`[${host}] exit ${r.code}:\n${detail}`)
+  throw resultError(`[${host}] exit ${r.code}:\n${detail}`)
 }
 
 export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: SetupContext) => {
@@ -130,19 +131,23 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
       ),
     /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
     exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
-      const r = await auditor.audited(
-        gated(host, { tool: "exec", agent: AGENT_UNKNOWN, command }, { command }),
-        () => runner.exec(host, command, AGENT_UNKNOWN),
-        summarizeExec(host),
-      )
+      const r = await auditor
+        .audited(
+          gated(host, { tool: "exec", agent: AGENT_UNKNOWN, command }, { command }),
+          () => runner.exec(host, command, AGENT_UNKNOWN),
+          summarizeExec(host),
+        )
+        .catch(routedError(host))
       return execOutput(host, r)
     },
     tmuxList: ({ host }: { host: string }): Promise<string> =>
-      auditor.audited(
-        gated(host, { tool: "tmux_list", agent: AGENT_UNKNOWN }),
-        async () => JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN))))),
-        noSummary,
-      ),
+      auditor
+        .audited(
+          gated(host, { tool: "tmux_list", agent: AGENT_UNKNOWN }),
+          async () => JSON.stringify(unwrap(await tmuxList(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN))))),
+          noSummary,
+        )
+        .catch(routedError(host)),
     tmuxSend: ({
       host,
       session,
@@ -156,41 +161,49 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
     }): Promise<string> => {
       const target = session ?? runner.sessionFor(host)
       const press = submit ?? true
-      return auditor.audited(
-        gated(host, { tool: "tmux_send", agent: AGENT_UNKNOWN }, { session: target, input, submit: press }),
-        async () => {
-          unwrap(
-            await tmuxSend(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), {
-              session: target,
-              input,
-              submit: press,
-            }),
-          )
-          return `[${host}] sent to tmux session "${target}".`
-        },
-        noSummary,
-      )
+      return auditor
+        .audited(
+          gated(host, { tool: "tmux_send", agent: AGENT_UNKNOWN }, { session: target, input, submit: press }),
+          async () => {
+            unwrap(
+              await tmuxSend(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), {
+                session: target,
+                input,
+                submit: press,
+              }),
+            )
+            return `[${host}] sent to tmux session "${target}".`
+          },
+          noSummary,
+        )
+        .catch(routedError(host))
     },
     tmuxRead: ({ host, session, lines }: { host: string; session?: string; lines?: number }): Promise<string> => {
       const target = session ?? runner.sessionFor(host)
       const count = lines ?? 200
-      return auditor.audited(
-        gated(host, { tool: "tmux_read", agent: AGENT_UNKNOWN }, { session: target, lines: count }),
-        async () =>
-          unwrap(await tmuxRead(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), { session: target, lines: count })),
-        (transcript) => ({ stdout_bytes: bytes(transcript) }),
-      )
+      return auditor
+        .audited(
+          gated(host, { tool: "tmux_read", agent: AGENT_UNKNOWN }, { session: target, lines: count }),
+          async () =>
+            unwrap(
+              await tmuxRead(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), { session: target, lines: count }),
+            ),
+          (transcript) => ({ stdout_bytes: bytes(transcript) }),
+        )
+        .catch(routedError(host))
     },
     tmuxKeys: ({ host, session, keys }: { host: string; session?: string; keys: string[] }): Promise<string> => {
       const target = session ?? runner.sessionFor(host)
-      return auditor.audited(
-        gated(host, { tool: "tmux_keys", agent: AGENT_UNKNOWN }, { session: target, keys }),
-        async () => {
-          unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), { session: target, keys }))
-          return `[${host}] sent keys [${keys.join(", ")}] to tmux session "${target}".`
-        },
-        noSummary,
-      )
+      return auditor
+        .audited(
+          gated(host, { tool: "tmux_keys", agent: AGENT_UNKNOWN }, { session: target, keys }),
+          async () => {
+            unwrap(await tmuxKeys(unwrap(runner.tmuxRunnerFor(host, AGENT_UNKNOWN)), { session: target, keys }))
+            return `[${host}] sent keys [${keys.join(", ")}] to tmux session "${target}".`
+          },
+          noSummary,
+        )
+        .catch(routedError(host))
     },
   }
 }

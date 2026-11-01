@@ -4,7 +4,7 @@ import { createRequire } from "node:module"
 
 import { execSshCommand, execSshResult, tmuxKeys, tmuxList, tmuxRead, type TmuxRunner, tmuxSend } from "@ssh-mcp/core"
 import { type Either, Option } from "functype"
-import { createServer, UserError } from "somamcp"
+import { createServer, UserError } from "somamcp/node"
 import { type ConnectConfig } from "ssh2"
 import { z } from "zod"
 
