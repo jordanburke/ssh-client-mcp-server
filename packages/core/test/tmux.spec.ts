@@ -6,6 +6,7 @@ import {
   buildRead,
   buildSend,
   clampLines,
+  isTmuxInputError,
   interpretAck,
   interpretKeys,
   interpretList,
@@ -37,6 +38,25 @@ describe("validateSession", () => {
       expect(r.isLeft()).toBe(true)
       if (r.isLeft()) expect(r.value).toContain("Invalid session name")
     }
+  })
+})
+
+describe("isTmuxInputError", () => {
+  const leftOf = (e: { fold: <R>(l: (m: string) => R, r: (v: string) => R) => R }): string =>
+    e.fold(
+      (m) => m,
+      () => "",
+    )
+
+  it("recognizes every argument error the builders return", () => {
+    expect(isTmuxInputError(leftOf(buildRead("bad name;", 5)))).toBe(true)
+    expect(isTmuxInputError(leftOf(buildKeys("s", ["F13"])))).toBe(true)
+    expect(isTmuxInputError(leftOf(buildKeys("s", [])))).toBe(true)
+  })
+
+  it("does not claim host failures", () => {
+    expect(isTmuxInputError("tmux not found on the remote host")).toBe(false)
+    expect(isTmuxInputError('unknown host "z"')).toBe(false)
   })
 })
 

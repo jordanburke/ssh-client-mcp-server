@@ -2,9 +2,18 @@
 
 import { createRequire } from "node:module"
 
-import { execSshCommand, execSshResult, tmuxKeys, tmuxList, tmuxRead, type TmuxRunner, tmuxSend } from "@ssh-mcp/core"
+import {
+  execSshCommand,
+  execSshResult,
+  isTmuxInputError,
+  tmuxKeys,
+  tmuxList,
+  tmuxRead,
+  type TmuxRunner,
+  tmuxSend,
+} from "@ssh-mcp/core"
 import { type Either, Option } from "functype"
-import { createServer, UserError } from "somamcp"
+import { createServer, UserError } from "somamcp/node"
 import { type ConnectConfig } from "ssh2"
 import { z } from "zod"
 
@@ -67,11 +76,11 @@ async function main() {
 
   const defaultSession = Option(argv["tmux-session"]).orElse("agent")
   const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
-  /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+  /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
   const unwrap = <T>(result: Either<string, T>): T =>
     result.fold(
       (msg) => {
-        throw new UserError(msg)
+        throw new UserError(msg, { category: isTmuxInputError(msg) ? "validation" : "execution", suggestions: [] })
       },
       (value) => value,
     )

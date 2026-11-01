@@ -71,7 +71,7 @@ Multi-host fleet MCP server. Entry point: `src/index.ts`.
 
 ### Key Dependencies (shared)
 
-- `somamcp` - MCP framework (wraps FastMCP; provides `createServer`, `UserError`, telemetry, introspection tools)
+- `somamcp` - MCP framework on the MCP TypeScript SDK 2.x (provides `createServer` from `somamcp/node`, `UserError` with `category`/`suggestions`, telemetry, the `info` tool). Node servers must import `createServer` from `somamcp/node`; the bare `somamcp` entry has no stdio transport.
 - `functype` - Functional types (`Option`, `Either`, `List`, `Try`) for config parsing and error accumulation
 - `functype-os` - OS helpers: `Path.expand` (tilde/env expansion), `Fs.readFile`, `Platform.userInfo()`
 - `ssh2` - SSH client implementation
@@ -80,11 +80,9 @@ Multi-host fleet MCP server. Entry point: `src/index.ts`.
 
 ### Introspection
 
-somamcp auto-registers these tools alongside the server's own tools:
+somamcp auto-registers one tool alongside the server's own tools:
 
-- `soma_health` — server uptime, status, session count
-- `soma_capabilities` — registered tools / resources / prompts
-- `soma_connections` — gateway connection status
+- `info` — server name, version, build (the fleet server passes its commit/branch/date), runtime, and capability counts
 
 Disable with `enableIntrospection: false` in `createServer()` options.
 

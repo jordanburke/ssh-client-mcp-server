@@ -307,3 +307,27 @@ describe("openAuditLog", () => {
     expect(readFileSync(join(dir, "target"), "utf8")).toBe("")
   })
 })
+
+describe("audit error labels", () => {
+  it("an audit log that can't be written is internal", async () => {
+    const auditor = createAuditor({
+      sink: () => {
+        throw new Error("EACCES")
+      },
+      now: () => new Date(),
+      newId: () => "id-1",
+    })
+    const call: AuditCall = { agent: AGENT_UNKNOWN, tool: "exec", host: Option("box-a"), fields: {}, verdict: ALLOW }
+    const e = await auditor
+      .audited(
+        call,
+        async () => "x",
+        () => ({}),
+      )
+      .then(
+        () => undefined,
+        (err: unknown) => err as UserError,
+      )
+    expect(e?.category).toBe("internal")
+  })
+})

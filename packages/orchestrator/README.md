@@ -149,6 +149,17 @@ Use `password_env` pointing at an environment variable instead. This keeps secre
 
 All tools except `hosts_list` and `fleet_setup` require a `host` parameter — the logical name of a configured fleet host (from `[[hosts]].name`). An unknown name raises an error immediately, before any SSH attempt.
 
+A failed call is an error result the model can read, labelled with an `errorCategory` and, where they help, `suggestions`:
+
+| `errorCategory` | When                                                      | Hint                                             |
+| --------------- | --------------------------------------------------------- | ------------------------------------------------ |
+| `auth`          | The host's policy denied the call.                        | Use what the policy allows, or ask the operator. |
+| `not_found`     | No host by that name.                                     | Call `hosts_list`.                               |
+| `timeout`       | Every pooled connection to the host is busy.              | Try again, or raise `[pool].max_per_host`.       |
+| `execution`     | The connection failed (message starts `[<host>]`).        | Call `fleet_setup`.                              |
+| `execution`     | The command exited non-zero, or tmux reported an error.   | None: the message carries the output.            |
+| `internal`      | The audit log can't be written, so every call is refused. | Check `[audit].path`.                            |
+
 The server also has somamcp's `info` tool. It reports the name, version and build: the short commit it was built from (with `-dirty` when the tree had uncommitted changes), the branch and the build date. Use it to tell which build a hub runs.
 
 ### `hosts_list`

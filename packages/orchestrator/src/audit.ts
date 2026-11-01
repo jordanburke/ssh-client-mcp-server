@@ -6,6 +6,7 @@ import { Path } from "functype-os"
 import { UserError } from "somamcp"
 
 import { type Verdict } from "./policy.js"
+import { deniedError } from "./tool-errors.js"
 
 export const AGENT_UNKNOWN = "unknown"
 export const DEFAULT_AUDIT_PATH = "~/.local/state/ssh-fleet/audit.jsonl"
@@ -54,12 +55,17 @@ const verdictFields = (call: AuditCall): Readonly<Record<string, string>> =>
       }
     : { decision: "deny", rule: qualify(call.host, call.verdict.rule), reason: call.verdict.reason }
 
-/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
 export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
   const write = (line: Readonly<Record<string, unknown>>, failure: string): void =>
     Try(() => sink(JSON.stringify(line))).fold(
       (e) => {
-        throw new UserError(`audit log write failed ${failure}: ${messageOf(e)}`)
+        throw new UserError(`audit log write failed ${failure}: ${messageOf(e)}`, {
+          category: "internal",
+          suggestions: [
+            "The server refuses every call while it can't write its audit log. Check the [audit].path file.",
+          ],
+        })
       },
       () => undefined,
     )
@@ -87,7 +93,7 @@ export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
         () => "",
         (host) => `[${host}] `,
       )
-      throw new UserError(`${prefix}denied by rule ${call.verdict.rule}: ${call.verdict.reason}`)
+      throw deniedError(`${prefix}denied by rule ${call.verdict.rule}: ${call.verdict.reason}`)
     }
 
     const outcome = await Promise.resolve()
