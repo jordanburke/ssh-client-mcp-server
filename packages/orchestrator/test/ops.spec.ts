@@ -453,6 +453,19 @@ describe("error labels", () => {
     expect(e.suggestions?.[0]).toMatch(/tmux_send/)
   })
 
+  it("a tmux command that ran past exec_timeout_ms is timeout too", async () => {
+    const { runner } = recording({ stdout: "", stderr: "", code: 124, timedOutMs: 600_000 })
+    const e = await caught(withAudit(runner).h.tmuxSend({ host: "box-a", input: "make" }))
+    expect(e.message).toBe("tmux_send timed out after 600000 ms")
+    expect(e.category).toBe("timeout")
+  })
+
+  it("a finished command whose output mentions a timeout is execution, not timeout", async () => {
+    const { runner } = recording({ stdout: "", stderr: "request to api timed out after 5000 ms", code: 1 })
+    const e = await caught(withAudit(runner).h.exec({ host: "box-a", command: "curl api" }))
+    expect(e.category).toBe("execution")
+  })
+
   it("a busy pool is timeout", async () => {
     const { h } = withAudit(throwing('host "box-a" busy: no free connection slot after 30000ms'))
     const e = await caught(h.exec({ host: "box-a", command: "true" }))

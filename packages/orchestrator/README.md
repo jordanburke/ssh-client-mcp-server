@@ -68,7 +68,7 @@ Default values applied to every host that does not override them.
 
 ### `[pool]` (optional)
 
-Controls the shared per-host connection pool.
+Controls the shared per-host connection pool. Each key below that is set must be a whole number from 1 to 2147483647, or startup fails; for the `_ms` keys that limit is about 24.8 days. There is no value that turns a timeout off.
 
 | Key                   | Type | Default   | Description                                                                                         |
 | --------------------- | ---- | --------- | --------------------------------------------------------------------------------------------------- |
@@ -159,10 +159,12 @@ A failed call is an error result the model can read, labelled with an `errorCate
 | `not_found`     | No host by that name.                                     | Call `hosts_list`.                               |
 | `timeout`       | Every pooled connection to the host is busy.              | Try again, or raise `[pool].max_per_host`.       |
 | `timeout`       | `exec` ran past its timeout (message: `timed out after`). | Run it in tmux, or pass a larger `timeout_ms`.   |
+| `timeout`       | A `tmux_*` command ran past `[pool].exec_timeout_ms`.     | Try again, or raise it.                          |
 | `execution`     | The connection failed (message starts `[<host>]`).        | Call `fleet_setup`.                              |
 | `execution`     | The command exited non-zero, or tmux reported an error.   | None: the message carries the output.            |
 | `validation`    | A bad tmux argument: session name, key, or empty `keys`.  | None: the message names the argument.            |
 | `internal`      | The audit log can't be written, so every call is refused. | Check `[audit].path`.                            |
+| `internal`      | A bug in the server (a `TypeError` or `RangeError`).      | None: report it.                                 |
 
 The server also has somamcp's `info` tool. It reports the name, version and build: the short commit it was built from (with `-dirty` when the tree had uncommitted changes), the branch and the build date. Use it to tell which build a hub runs.
 
@@ -205,9 +207,9 @@ Run a one-shot shell command on a fleet host over SSH.
 | `command`    | string | yes      | Shell command to execute.                                                                            |
 | `timeout_ms` | int    | no       | How long to wait (ms). Defaults to `[pool].exec_timeout_ms`, capped at `[pool].max_exec_timeout_ms`. |
 
-Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0. A command a signal ended (an OOM kill, `kill -9`) fails as 128 plus the signal number, with the name: `exit 137 (signal KILL)`; the audit result line records `signal` beside `code`.
+Returns stdout. If the command also wrote to stderr, the stderr text follows under a `[stderr]` line, so warnings stay visible. A non-zero exit raises a `UserError` with the host name, exit code, and stderr, then stdout under a `[stdout]` line (either one alone when the other is empty). Exit code 0 always succeeds, even with stderr: many tools, such as `systemctl`, warn on stderr and exit 0. A command a signal ended (an OOM kill, `kill -9`) fails as 128 plus the signal number, with the name: `exit 137 (signal KILL)`; the audit result line records `signal` beside `code`. On a `ca` host, OpenSSH's `ssh` reports a signal as plain `exit 255`, with no name. If the connection drops before the command finishes, the call fails with `exit 255 (no exit status: channel closed)` and the audit line records `no_exit_status`.
 
-When the timeout runs out, the call fails with label `timeout` and the output so far: `[<host>] timed out after 5000 ms:` then stderr and stdout as above. The server stops waiting, sends the command `KILL`, and closes the channel. OpenSSH 7.9 and later deliver the signal; an older server ignores it, and the command keeps running until it next writes output. On a `ca` host, the server kills its local `ssh` client instead, with the same effect on the host. The audit result line records `timed_out_ms`. The `tmux_*` tools wait `[pool].exec_timeout_ms` too.
+When the timeout runs out, the call fails with label `timeout` and the output so far: `[<host>] timed out after 5000 ms:` then stderr and stdout as above. The server stops waiting, sends the command `KILL`, and closes the channel. OpenSSH 7.9 and later deliver the signal; an older server ignores it, and the command keeps running until it next writes output. On a `ca` host, the server kills its local `ssh` client instead. That closes the channel but sends no signal, so the command stops only when it next writes output, as on an older server. The audit result line records `timed_out_ms`. The `tmux_*` tools wait `[pool].exec_timeout_ms` too.
 
 #### Long jobs
 

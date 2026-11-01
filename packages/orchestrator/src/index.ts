@@ -106,6 +106,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
       code: r.code,
       ...(r.signal === undefined ? {} : { signal: r.signal }),
       ...(r.timedOutMs === undefined ? {} : { timed_out_ms: r.timedOutMs }),
+      ...(r.noExitStatus === true ? { no_exit_status: true } : {}),
       stdout_bytes: bytes(r.stdout),
       stderr_bytes: bytes(r.stderr),
       ...(runner.logOutputFor(host) ? { stdout_excerpt: excerpt(r.stdout), stderr_excerpt: excerpt(r.stderr) } : {}),

@@ -4,7 +4,7 @@ import { type Either, Left, Option, Right } from "functype"
 import { UserError } from "somamcp"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 
-import { type CommandResult } from "./tmux.js"
+import { type CommandResult, exitLabel } from "./tmux.js"
 
 // A signal number differs by OS only for rarer signals; KILL, TERM, INT and HUP match everywhere.
 const signalCode = (signal: string): number =>
@@ -21,7 +21,9 @@ const signalCode = (signal: string): number =>
  */
 export const channelResult = (stdout: string, stderr: string, code: unknown, signal: unknown): CommandResult => {
   if (typeof code === "number") return { stdout, stderr, code }
-  const name = typeof signal === "string" && signal !== "" ? signal.replace(/^SIG/, "") : "unknown"
+  // Neither: the channel closed before the host sent an exit status, e.g. the connection dropped.
+  if (typeof signal !== "string" || signal === "") return { stdout, stderr, code: 255, noExitStatus: true }
+  const name = signal.replace(/^SIG/, "")
   return { stdout, stderr, code: signalCode(name), signal: name }
 }
 
@@ -36,12 +38,6 @@ export const timedOutResult = (stdout: string, stderr: string, timeoutMs: number
   code: TIMEOUT_CODE,
   timedOutMs: timeoutMs,
 })
-
-/** "exit 1", "exit 137 (signal KILL)", or "timed out after 5000 ms". */
-export const exitLabel = (r: CommandResult): string => {
-  if (r.timedOutMs !== undefined) return `timed out after ${r.timedOutMs} ms`
-  return r.signal === undefined ? `exit ${r.code}` : `exit ${r.code} (signal ${r.signal})`
-}
 
 /**
  * What `exec` returns for a finished command. A non-zero exit is the failure signal, not stderr:

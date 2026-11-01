@@ -11,7 +11,22 @@ export type CommandResult = Readonly<{
   code: number
   signal?: string
   timedOutMs?: number
+  // The channel closed with no exit status (the connection dropped); code is then 255.
+  noExitStatus?: true
 }>
+
+/** "exit 1", "exit 137 (signal KILL)", "exit 255 (no exit status: channel closed)", or "timed out after 5000 ms". */
+export const exitLabel = (r: CommandResult): string => {
+  if (r.timedOutMs !== undefined) return `timed out after ${r.timedOutMs} ms`
+  if (r.noExitStatus === true) return `exit ${r.code} (no exit status: channel closed)`
+  return r.signal === undefined ? `exit ${r.code}` : `exit ${r.code} (signal ${r.signal})`
+}
+
+// The whole message a tmux interpreter returns for a timed-out command ("tmux_send timed out after
+// 5000 ms"). Anchored, so a failure whose stderr merely mentions a timeout doesn't match.
+const TIMED_OUT_RE = /^tmux[\w -]* timed out after \d+ ms$/
+
+export const isTimedOutMessage = (message: string): boolean => TIMED_OUT_RE.test(message)
 
 export type TmuxRunner = (command: string) => Promise<CommandResult>
 
@@ -115,9 +130,14 @@ const NO_SERVER_RE = /no server running|error connecting to \S+ \(No such file o
 export const isTmuxMissing = (r: CommandResult): boolean =>
   r.code === 127 || /tmux: ([Cc]ommand )?not found/i.test(r.stderr)
 
-const failure = (label: string, r: CommandResult): string => `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
+const failure = (label: string, r: CommandResult): string =>
+  r.timedOutMs === undefined ? `${label} failed: ${r.stderr.trim() || exitLabel(r)}` : `${label} ${exitLabel(r)}`
+
+// Each interpreter checks a timed-out result first, so its partial stderr can't read as "no server"
+// or "no session".
 
 export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<string>> => {
+  if (r.timedOutMs !== undefined) return Left<string, ReadonlyArray<string>>(failure("tmux list-sessions", r))
   if (isTmuxMissing(r)) return Left<string, ReadonlyArray<string>>(TMUX_MISSING_MSG)
   if (r.code === 0) {
     return Right<string, ReadonlyArray<string>>(
@@ -134,6 +154,7 @@ export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<st
 export const interpretAck =
   (label: string) =>
   (r: CommandResult): Either<string, void> => {
+    if (r.timedOutMs !== undefined) return Left<string, void>(failure(label, r))
     if (isTmuxMissing(r)) return Left<string, void>(TMUX_MISSING_MSG)
     if (r.code === 0) return Right<string, void>(undefined)
     return Left<string, void>(failure(label, r))
@@ -142,6 +163,7 @@ export const interpretAck =
 export const interpretRead =
   (session: string) =>
   (r: CommandResult): Either<string, string> => {
+    if (r.timedOutMs !== undefined) return Left<string, string>(failure("tmux capture-pane", r))
     if (isTmuxMissing(r)) return Left<string, string>(TMUX_MISSING_MSG)
     if (r.code === 0) return Right<string, string>(trimTrailingWhitespace(r.stdout))
     if (SESSION_MISSING_RE.test(r.stderr)) {
@@ -153,6 +175,7 @@ export const interpretRead =
 export const interpretKeys =
   (session: string) =>
   (r: CommandResult): Either<string, void> => {
+    if (r.timedOutMs !== undefined) return Left<string, void>(failure("tmux send-keys", r))
     if (isTmuxMissing(r)) return Left<string, void>(TMUX_MISSING_MSG)
     if (r.code === 0) return Right<string, void>(undefined)
     if (SESSION_MISSING_RE.test(r.stderr)) {
