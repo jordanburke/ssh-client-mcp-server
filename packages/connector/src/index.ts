@@ -65,7 +65,7 @@ async function main() {
     instructions: "Execute shell commands on a remote host over SSH.",
   })
 
-  /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
+  /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
   const unwrap = <T>(result: Either<string, T>): T =>
     result.fold(
       (msg) => {

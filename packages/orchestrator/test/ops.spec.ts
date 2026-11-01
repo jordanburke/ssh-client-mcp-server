@@ -431,6 +431,20 @@ describe("error labels", () => {
     expect(e.suggestions).toEqual(["Call fleet_setup to see box-a's connection state and what to configure."])
   })
 
+  it("a bug in the server is internal, not a connection failure", async () => {
+    const { runner } = recording()
+    const broken: FleetRunner = {
+      ...runner,
+      exec: async () => {
+        throw new TypeError("Cannot read properties of undefined (reading 'code')")
+      },
+    }
+    const e = await caught(withAudit(broken).h.exec({ host: "box-a", command: "true" }))
+    expect(e.category).toBe("internal")
+    expect(e.message).not.toContain("[box-a]")
+    expect(e.suggestions).toEqual([])
+  })
+
   it("a busy pool is timeout", async () => {
     const { h } = withAudit(throwing('host "box-a" busy: no free connection slot after 30000ms'))
     const e = await caught(h.exec({ host: "box-a", command: "true" }))

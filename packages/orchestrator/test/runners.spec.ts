@@ -118,6 +118,16 @@ agent = true
     }
   })
 
+  it("exec and tmux give the same unknown-host message, listing the configured hosts", async () => {
+    if (fleet.isLeft()) throw new Error(fleet.value)
+    const r = await buildFleetRunner(fleet.value, connect)
+    if (r.isLeft()) throw new Error(r.value)
+    const tmux = r.value.tmuxRunnerFor("ghost", "unknown").swap().orElse("")
+    expect(tmux).toMatch(/^unknown host "ghost" — configured: /)
+    await expect(r.value.exec("ghost", "true", "unknown")).rejects.toThrow(tmux)
+    await r.value.shutdown()
+  })
+
   it("an empty fleet builds a runner", async () => {
     const f = parseFleet("")
     if (f.isLeft()) throw new Error(f.value)
@@ -215,6 +225,8 @@ agent = true
         .orElse(""),
     ).toContain("NOPE_KEY")
     await expect(r.value.exec("x", "true", "unknown")).rejects.toThrow("NOPE_KEY")
+    // The tool adds "[x] ", so the message must not name the host itself.
+    await expect(r.value.exec("x", "true", "unknown")).rejects.not.toThrow('host "x"')
     expect(r.value.status()).toContainEqual({ name: "x", state: "disconnected", inFlight: 0 })
     expect((await r.value.exec("y", "true", "unknown")).code).toBe(0)
     await r.value.shutdown()

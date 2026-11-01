@@ -61,7 +61,7 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
   version: `${number}.${number}.${number}`
 }
 
-/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
+/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
 const unwrap = <T>(result: Either<string, T>): T =>
   result.fold(
     (msg) => {
@@ -121,7 +121,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
         () => Promise.resolve(JSON.stringify(setupReport(setup, runner))),
         noSummary,
       ),
-    /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
+    /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
     exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
       const r = await auditor
         .audited(

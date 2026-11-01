@@ -181,7 +181,7 @@ export const buildFleetRunner = async (
   )
   const authErrors = resolved.flatMap(({ name, sshConfig }) =>
     sshConfig.fold<Array<[string, string]>>(
-      (e) => [[name, `host "${name}": ${e}`]],
+      (e) => [[name, e]],
       () => [],
     ),
   )
@@ -248,7 +248,7 @@ const makeRunner = (
       () => sshPool.run(host, command),
       (h) =>
         ca.fold(
-          () => Promise.reject(new Error(`host "${host}" uses ca auth but CA custody is not running`)),
+          () => Promise.reject(new Error("CA custody is not running, and this host uses ca auth")),
           (wiring) => caPoolFor(h, agent, wiring).run(host, command),
         ),
     )
@@ -289,6 +289,12 @@ const makeRunner = (
         : pools.flatMap((p) => p.pool.status().map((s) => ({ ...s, name: `${h.name} (${p.agent})` })))
     })
 
+  // One message for every tool, so exec and tmux_* both list the configured names.
+  const unknownHost = (host: string): string =>
+    names.size === 0
+      ? `unknown host "${host}" — no hosts are configured`
+      : `unknown host "${host}" — configured: ${[...names].join(", ")}`
+
   return {
     hostNames: fleet.hosts.map((h) => h.name),
     sessionFor: (host) => sessions.get(host).orElse("agent"),
@@ -297,12 +303,9 @@ const makeRunner = (
     tmuxRunnerFor: (host, agent) =>
       names.has(host)
         ? Right<string, TmuxRunner>((command) => runOn(host, command, agent))
-        : Left<string, TmuxRunner>(
-            names.size === 0
-              ? `unknown host "${host}" — no hosts are configured`
-              : `unknown host "${host}" — configured: ${[...names].join(", ")}`,
-          ),
-    exec: (host, command, agent) => runOn(host, command, agent),
+        : Left<string, TmuxRunner>(unknownHost(host)),
+    exec: (host, command, agent) =>
+      names.has(host) ? runOn(host, command, agent) : Promise.reject(new Error(unknownHost(host))),
     status: () => [
       ...sshPool.status(),
       ...authErrors.map(([name]): HostStatus => ({ name, state: "disconnected", inFlight: 0 })),

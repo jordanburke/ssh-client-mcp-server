@@ -25,12 +25,15 @@ export const deniedError = (message: string): UserError =>
 
 /**
  * Labels a runner failure: an unknown host, a busy pool, or a connection that failed.
- * @interop a `.catch` handler for a tool's promise; somamcp reports a failure only when it throws UserError.
+ * @interop a `.catch` handler for a tool's promise; it rethrows as UserError so the label and hints are ours, not guessed.
  */
 export const routedError =
   (host: string) =>
   (e: unknown): never => {
     if (e instanceof UserError) throw e
+    // A TypeError or RangeError is a bug in this server, not a host failure: don't send the model to fleet_setup.
+    if (e instanceof TypeError || e instanceof RangeError)
+      throw new UserError(e.message, { category: "internal", suggestions: [] })
     const message = e instanceof Error ? e.message : String(e)
     if (isUnknownHost(message))
       throw new UserError(message, { category: "not_found", suggestions: [UNKNOWN_HOST_HINT] })
