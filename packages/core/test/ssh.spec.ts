@@ -23,6 +23,10 @@ describe("channelResult", () => {
     expect(channelResult("", "", null, "TERM").code).toBe(143)
   })
 
+  it("accepts the SIG-prefixed name ssh2 gives", () => {
+    expect(channelResult("", "", null, "SIGKILL")).toEqual({ stdout: "", stderr: "", code: 137, signal: "KILL" })
+  })
+
   it("still fails when ssh2 gives neither code nor signal", () => {
     expect(channelResult("", "", undefined, undefined)).toEqual({
       stdout: "",

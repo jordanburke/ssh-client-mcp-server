@@ -16,11 +16,12 @@ const signalCode = (signal: string): number =>
 /**
  * The result of an ssh2 channel from its "close" arguments.
  * @interop ssh2 passes (code, signal) to "close" but @types/ssh2 declares none; code is null when
- * a signal ended the command, and signal is its name without "SIG".
+ * a signal ended the command, and signal is its name. ssh2 gives it as "SIGKILL" (observed against
+ * OpenSSH on macOS); the SSH wire format says "KILL". Both become "KILL".
  */
 export const channelResult = (stdout: string, stderr: string, code: unknown, signal: unknown): CommandResult => {
   if (typeof code === "number") return { stdout, stderr, code }
-  const name = typeof signal === "string" && signal !== "" ? signal : "unknown"
+  const name = typeof signal === "string" && signal !== "" ? signal.replace(/^SIG/, "") : "unknown"
   return { stdout, stderr, code: signalCode(name), signal: name }
 }
 
