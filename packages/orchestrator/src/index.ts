@@ -55,7 +55,7 @@ import {
   type SetupContext,
   setupReport,
 } from "./setup.js"
-import { resultError, routedError } from "./tool-errors.js"
+import { resultError, routedError, timeoutError } from "./tool-errors.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -103,6 +103,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
     (r: CommandResult): AuditFields => ({
       code: r.code,
       ...(r.signal === undefined ? {} : { signal: r.signal }),
+      ...(r.timedOutMs === undefined ? {} : { timed_out_ms: r.timedOutMs }),
       stdout_bytes: bytes(r.stdout),
       stderr_bytes: bytes(r.stderr),
       ...(runner.logOutputFor(host) ? { stdout_excerpt: excerpt(r.stdout), stderr_excerpt: excerpt(r.stderr) } : {}),
@@ -122,17 +123,29 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
         noSummary,
       ),
     /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw gets a label somamcp guesses from its message. */
-    exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
+    exec: async ({
+      host,
+      command,
+      timeout_ms,
+    }: {
+      host: string
+      command: string
+      timeout_ms?: number
+    }): Promise<string> => {
       const r = await auditor
         .audited(
-          gated(host, { tool: "exec", agent: AGENT_UNKNOWN, command }, { command }),
-          () => runner.exec(host, command, AGENT_UNKNOWN),
+          gated(
+            host,
+            { tool: "exec", agent: AGENT_UNKNOWN, command },
+            { command, ...(timeout_ms === undefined ? {} : { timeout_ms }) },
+          ),
+          () => runner.exec(host, command, AGENT_UNKNOWN, timeout_ms),
           summarizeExec(host),
         )
         .catch(routedError(host))
       return execOutput(r).fold(
         (failure) => {
-          throw resultError(`[${host}] ${failure}`)
+          throw r.timedOutMs === undefined ? resultError(`[${host}] ${failure}`) : timeoutError(host, failure)
         },
         (output) => output,
       )
@@ -398,8 +411,19 @@ async function main(): Promise<void> {
   server.addTool({
     name: "exec",
     description: "Run a one-shot shell command on a fleet host over SSH.",
-    parameters: z.object({ host: hostParam, command: z.string().min(1).describe("Shell command") }),
-    execute: ({ host, command }) => h.exec({ host, command }),
+    parameters: z.object({
+      host: hostParam,
+      command: z.string().min(1).describe("Shell command"),
+      timeout_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          `How long to wait, in ms. Default ${fleet.pool.execTimeoutMs}; at most ${fleet.pool.maxExecTimeoutMs}, and a larger value is lowered to it. On timeout the call fails with the output so far, and the command may still be running. For longer jobs, run them in tmux (tmux_send, then tmux_read).`,
+        ),
+    }),
+    execute: ({ host, command, timeout_ms }) => h.exec({ host, command, timeout_ms }),
   })
   server.addTool({
     name: "tmux_list",

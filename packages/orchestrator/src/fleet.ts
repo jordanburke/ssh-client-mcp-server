@@ -26,7 +26,17 @@ export type HostEntry = Readonly<{
 
 export type AuthKind = "password_env" | "key" | "key_env" | "agent" | "ca"
 
-export type PoolSettings = Readonly<{ maxPerHost: number; idleTimeoutMs: number; acquireTimeoutMs: number }>
+export type PoolSettings = Readonly<{
+  maxPerHost: number
+  idleTimeoutMs: number
+  acquireTimeoutMs: number
+  // exec's wait when the call gives no timeout_ms, and the most a call may ask for.
+  execTimeoutMs: number
+  maxExecTimeoutMs: number
+}>
+
+export const DEFAULT_EXEC_TIMEOUT_MS = 600_000
+export const DEFAULT_MAX_EXEC_TIMEOUT_MS = 3_600_000
 
 export type AuditSettings = Readonly<{ path: string }>
 
@@ -89,6 +99,8 @@ const parsePool = (raw: Record<string, unknown>): PoolSettings => {
     maxPerHost: num(p.max_per_host).orElse(2),
     idleTimeoutMs: num(p.idle_timeout_ms).orElse(60000),
     acquireTimeoutMs: num(p.acquire_timeout_ms).orElse(30000),
+    execTimeoutMs: num(p.exec_timeout_ms).orElse(DEFAULT_EXEC_TIMEOUT_MS),
+    maxExecTimeoutMs: num(p.max_exec_timeout_ms).orElse(DEFAULT_MAX_EXEC_TIMEOUT_MS),
   }
 }
 

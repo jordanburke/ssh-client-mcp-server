@@ -24,9 +24,23 @@ export const channelResult = (stdout: string, stderr: string, code: unknown, sig
   return { stdout, stderr, code: signalCode(name), signal: name }
 }
 
-/** "exit 1", or "exit 137 (signal KILL)". */
-export const exitLabel = (r: CommandResult): string =>
-  r.signal === undefined ? `exit ${r.code}` : `exit ${r.code} (signal ${r.signal})`
+/** Options for one command. Without `timeoutMs`, exec waits as long as the command runs. */
+export type ExecOptions = Readonly<{ timeoutMs?: number }>
+
+export const TIMEOUT_CODE = 124
+
+export const timedOutResult = (stdout: string, stderr: string, timeoutMs: number): CommandResult => ({
+  stdout,
+  stderr,
+  code: TIMEOUT_CODE,
+  timedOutMs: timeoutMs,
+})
+
+/** "exit 1", "exit 137 (signal KILL)", or "timed out after 5000 ms". */
+export const exitLabel = (r: CommandResult): string => {
+  if (r.timedOutMs !== undefined) return `timed out after ${r.timedOutMs} ms`
+  return r.signal === undefined ? `exit ${r.code}` : `exit ${r.code} (signal ${r.signal})`
+}
 
 /**
  * What `exec` returns for a finished command. A non-zero exit is the failure signal, not stderr:

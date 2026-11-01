@@ -128,6 +128,28 @@ agent = true
     await r.value.shutdown()
   })
 
+  it("exec waits [pool].exec_timeout_ms by default and never longer than max_exec_timeout_ms", async () => {
+    const seen: Array<number | undefined> = []
+    const recordingConnect: ConnectFactory = async () => ({
+      ...fakeConn,
+      exec: async (command, opts) => {
+        seen.push(opts?.timeoutMs)
+        return { stdout: command, stderr: "", code: 0 }
+      },
+    })
+    const f = parseFleet(
+      `[pool]\nexec_timeout_ms = 5000\nmax_exec_timeout_ms = 9000\n[[hosts]]\nname = "box-a"\nhost = "10.0.0.11"\nagent = true\n`,
+    )
+    if (f.isLeft()) throw new Error(f.value)
+    const r = await buildFleetRunner(f.value, recordingConnect)
+    if (r.isLeft()) throw new Error(r.value)
+    await r.value.exec("box-a", "a", "unknown")
+    await r.value.exec("box-a", "b", "unknown", 7000)
+    await r.value.exec("box-a", "c", "unknown", 60_000)
+    expect(seen).toEqual([5000, 7000, 9000])
+    await r.value.shutdown()
+  })
+
   it("an empty fleet builds a runner", async () => {
     const f = parseFleet("")
     if (f.isLeft()) throw new Error(f.value)

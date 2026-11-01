@@ -16,6 +16,15 @@ export const resultError = (message: string): UserError => {
   return new UserError(message, { category: "execution", suggestions: [] })
 }
 
+/** exec stopped waiting: the message carries the output so far. */
+export const timeoutError = (host: string, failure: string): UserError =>
+  new UserError(`[${host}] ${failure}`, {
+    category: "timeout",
+    suggestions: [
+      `The command may still be running on ${host}. For a long job, start it in tmux with tmux_send and check it with tmux_read, or pass a larger timeout_ms.`,
+    ],
+  })
+
 /** A call the host's policy refused. */
 export const deniedError = (message: string): UserError =>
   new UserError(message, {

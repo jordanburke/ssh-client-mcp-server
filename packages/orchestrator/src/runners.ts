@@ -8,6 +8,7 @@ import {
   type ConnectFactory,
   createPool,
   type Custody,
+  type ExecOptions,
   type HostStatus,
   mint,
   nodeProcessRunner,
@@ -15,6 +16,7 @@ import {
   opensshConnect,
   type Pool,
   type ProcessRunner,
+  type ProcResult,
   resolveAuth,
   socketPathFor,
   type TmuxRunner,
@@ -29,7 +31,8 @@ import { type HostPolicy } from "./policy.js"
 export type FleetRunner = Readonly<{
   hostNames: string[]
   tmuxRunnerFor: (host: string, agent: string) => Either<string, TmuxRunner>
-  exec: (host: string, command: string, agent: string) => Promise<CommandResult>
+  // timeoutMs defaults to [pool].exec_timeout_ms and is capped at [pool].max_exec_timeout_ms.
+  exec: (host: string, command: string, agent: string, timeoutMs?: number) => Promise<CommandResult>
   sessionFor: (host: string) => string
   logOutputFor: (host: string) => boolean
   policyFor: (host: string) => Option<HostPolicy>
@@ -102,10 +105,14 @@ const readCaKey = async (ref: CaKeyRef, timeoutMs: number): Promise<Either<strin
       ) as Readonly<Record<string, string>>
       const r = await nodeProcessRunner
         .run("sh", ["-c", ref.cmd], { env, timeoutMs })
-        .catch((e: unknown) => ({ code: -1, stdout: "", stderr: (e as Error).message }))
+        .catch((e: unknown): ProcResult => ({ code: -1, stdout: "", stderr: (e as Error).message }))
       return r.code === 0 && r.stdout.trim().length > 0
         ? Right<string, string>(`${r.stdout.trim()}\n`)
-        : Left<string, string>(`key_cmd exited ${r.code}: ${r.stderr.trim() || "no output"}`)
+        : Left<string, string>(
+            r.timedOut === true
+              ? `key_cmd timed out after ${timeoutMs} ms`
+              : `key_cmd exited ${r.code}: ${r.stderr.trim() || "no output"}`,
+          )
     }
     case "env": {
       const value = process.env[ref.name]
@@ -243,21 +250,21 @@ const makeRunner = (
     return pool
   }
 
-  const routeConnected = (host: string, command: string, agent: string): Promise<CommandResult> =>
+  const routeConnected = (host: string, command: string, agent: string, opts: ExecOptions): Promise<CommandResult> =>
     caHostByName.get(host).fold(
-      () => sshPool.run(host, command),
+      () => sshPool.run(host, command, opts),
       (h) =>
         ca.fold(
           () => Promise.reject(new Error("CA custody is not running, and this host uses ca auth")),
-          (wiring) => caPoolFor(h, agent, wiring).run(host, command),
+          (wiring) => caPoolFor(h, agent, wiring).run(host, command, opts),
         ),
     )
 
   const authErrorByName = Map.of(...authErrors.map(([name, msg]): [string, string] => [name, msg]))
 
-  const route = (host: string, command: string, agent: string): Promise<CommandResult> =>
+  const route = (host: string, command: string, agent: string, opts: ExecOptions): Promise<CommandResult> =>
     authErrorByName.get(host).fold(
-      () => routeConnected(host, command, agent),
+      () => routeConnected(host, command, agent, opts),
       (msg) => Promise.reject(new Error(msg)),
     )
 
@@ -269,8 +276,11 @@ const makeRunner = (
   // A rejection is a connection-level failure (connect, auth, transport, or a busy pool's acquire
   // timeout); a non-zero exit code resolves and isn't one.
   // Only configured hosts are recorded, so unknown names can't grow the map.
-  const runOn = (host: string, command: string, agent: string): Promise<CommandResult> =>
-    route(host, command, agent).then(
+  const effectiveTimeout = (requested?: number): number =>
+    Math.min(requested ?? fleet.pool.execTimeoutMs, fleet.pool.maxExecTimeoutMs)
+
+  const runOn = (host: string, command: string, agent: string, timeoutMs?: number): Promise<CommandResult> =>
+    route(host, command, agent, { timeoutMs: effectiveTimeout(timeoutMs) }).then(
       (result) => {
         lastErrors.delete(host)
         return result
@@ -304,8 +314,8 @@ const makeRunner = (
       names.has(host)
         ? Right<string, TmuxRunner>((command) => runOn(host, command, agent))
         : Left<string, TmuxRunner>(unknownHost(host)),
-    exec: (host, command, agent) =>
-      names.has(host) ? runOn(host, command, agent) : Promise.reject(new Error(unknownHost(host))),
+    exec: (host, command, agent, timeoutMs) =>
+      names.has(host) ? runOn(host, command, agent, timeoutMs) : Promise.reject(new Error(unknownHost(host))),
     status: () => [
       ...sshPool.status(),
       ...authErrors.map(([name]): HostStatus => ({ name, state: "disconnected", inFlight: 0 })),

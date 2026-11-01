@@ -445,6 +445,14 @@ describe("error labels", () => {
     expect(e.suggestions).toEqual([])
   })
 
+  it("an exec timeout is timeout, keeps the output so far, and points at tmux", async () => {
+    const { runner } = recording({ stdout: "step 1\n", stderr: "", code: 124, timedOutMs: 5000 })
+    const e = await caught(withAudit(runner).h.exec({ host: "box-a", command: "upgrade", timeout_ms: 5000 }))
+    expect(e.category).toBe("timeout")
+    expect(e.message).toBe("[box-a] timed out after 5000 ms:\nstep 1\n")
+    expect(e.suggestions?.[0]).toMatch(/tmux_send/)
+  })
+
   it("a busy pool is timeout", async () => {
     const { h } = withAudit(throwing('host "box-a" busy: no free connection slot after 30000ms'))
     const e = await caught(h.exec({ host: "box-a", command: "true" }))

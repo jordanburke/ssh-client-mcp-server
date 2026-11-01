@@ -37,6 +37,14 @@ export const FLEET_TEMPLATE = `# ssh-fleet-mcp-server config.
 # allow = ['uptime', 'df -h']
 # --- end ---
 
+# --- example: exec timeouts ---
+## exec waits exec_timeout_ms unless a call passes timeout_ms, and never longer than
+## max_exec_timeout_ms. Run longer jobs in tmux (tmux_send, then tmux_read).
+# [pool]
+# exec_timeout_ms = 600000
+# max_exec_timeout_ms = 3600000
+# --- end ---
+
 # --- example: certificate authority ---
 ## If key_file doesn't exist, the server creates it on first start. fleet_setup then shows
 ## the line to add to a root-owned authorized-keys file on each host. To keep the key off

@@ -1,11 +1,13 @@
 import { Map } from "functype"
 import { Client as SSHClient, type ConnectConfig } from "ssh2"
 
-import { channelResult } from "./ssh.js"
+import { channelResult, type ExecOptions, timedOutResult } from "./ssh.js"
 import { type CommandResult } from "./tmux.js"
 
+// A timeout resolves with the partial output, never rejects: a rejection makes the pool reconnect
+// and run the command again.
 export type PooledConnection = {
-  exec: (command: string) => Promise<CommandResult>
+  exec: (command: string, opts?: ExecOptions) => Promise<CommandResult>
   close: () => void
   onClose: (cb: () => void) => void
 }
@@ -17,7 +19,7 @@ export type PoolOptions = { maxPerHost: number; idleTimeoutMs: number; acquireTi
 export type HostStatus = { name: string; state: "connected" | "idle" | "disconnected"; inFlight: number }
 
 export type Pool = {
-  run: (hostName: string, command: string) => Promise<CommandResult>
+  run: (hostName: string, command: string, opts?: ExecOptions) => Promise<CommandResult>
   status: () => HostStatus[]
   shutdown: () => Promise<void>
 }
@@ -39,7 +41,7 @@ export const defaultConnect: ConnectFactory = (sshConfig) =>
     const closeCbs: Array<() => void> = []
     client.on("ready", () =>
       resolve({
-        exec: (command) =>
+        exec: (command, opts = {}) =>
           new Promise<CommandResult>((res, rej) => {
             client.exec(command, (err, stream) => {
               if (err) {
@@ -48,9 +50,21 @@ export const defaultConnect: ConnectFactory = (sshConfig) =>
               }
               const out: Buffer[] = []
               const errb: Buffer[] = []
-              stream.on("close", (code: unknown, signal: unknown) =>
-                res(channelResult(Buffer.concat(out).toString(), Buffer.concat(errb).toString(), code, signal)),
-              )
+              const timer =
+                opts.timeoutMs === undefined
+                  ? undefined
+                  : setTimeout(() => {
+                      const ms = opts.timeoutMs ?? 0
+                      res(timedOutResult(Buffer.concat(out).toString(), Buffer.concat(errb).toString(), ms))
+                      // OpenSSH 7.9+ delivers the signal; an older sshd ignores it, and closing the
+                      // channel only stops the command if it then writes output.
+                      stream.signal("KILL")
+                      stream.close()
+                    }, opts.timeoutMs)
+              stream.on("close", (code: unknown, signal: unknown) => {
+                clearTimeout(timer)
+                res(channelResult(Buffer.concat(out).toString(), Buffer.concat(errb).toString(), code, signal))
+              })
               stream.on("data", (d: Buffer) => out.push(d))
               stream.stderr.on("data", (d: Buffer) => errb.push(d))
             })
@@ -142,7 +156,7 @@ export const createPool = (
     }
   }
 
-  const run = async (hostName: string, command: string): Promise<CommandResult> => {
+  const run = async (hostName: string, command: string, opts?: ExecOptions): Promise<CommandResult> => {
     const st = states.get(hostName).orThrow(new Error(`unknown host "${hostName}"`))
     if (st.idleTimer) {
       clearTimeout(st.idleTimer)
@@ -151,11 +165,11 @@ export const createPool = (
     await acquireSlot(st)
     try {
       const conn = await ensureConn(st)
-      return await conn.exec(command).catch(async () => {
+      return await conn.exec(command, opts).catch(async () => {
         // connection likely dead — drop, reconnect once, retry
         dropConn(st)
         const fresh = await ensureConn(st)
-        return fresh.exec(command)
+        return fresh.exec(command, opts)
       })
     } finally {
       releaseSlot(st)

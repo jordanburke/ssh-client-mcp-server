@@ -239,7 +239,16 @@ ca = "home"
     if (r.isRight()) {
       expect(r.value.pool.maxPerHost).toBe(2)
       expect(r.value.pool.idleTimeoutMs).toBe(60000)
+      expect(r.value.pool.execTimeoutMs).toBe(600_000)
+      expect(r.value.pool.maxExecTimeoutMs).toBe(3_600_000)
     }
+  })
+
+  it("reads exec timeouts from [pool]", () => {
+    const r = parseFleet(`[pool]\nexec_timeout_ms = 5000\nmax_exec_timeout_ms = 9000\n${base}`)
+    if (r.isLeft()) throw new Error(r.value)
+    expect(r.value.pool.execTimeoutMs).toBe(5000)
+    expect(r.value.pool.maxExecTimeoutMs).toBe(9000)
   })
 
   it("rejects malformed TOML", () => {
