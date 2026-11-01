@@ -11,6 +11,13 @@ export const validateSession = (name: string): Either<string, string> =>
     ? Right<string, string>(name)
     : Left<string, string>(`Invalid session name "${name}": only letters, digits, hyphen, and underscore are allowed`)
 
+// The three argument errors the builders below return. Callers label them as validation errors
+// (the caller sent a bad argument), not execution errors (the host failed).
+const INPUT_ERROR_PREFIXES = ["Invalid session name ", "Unsupported key ", "No keys provided"] as const
+
+export const isTmuxInputError = (message: string): boolean =>
+  INPUT_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix))
+
 export const shellQuote = (s: string): string => `'${s.replaceAll("'", "'\\''")}'`
 
 export const clampLines = (n: number): number => Math.max(1, Math.min(2000, Math.floor(n)))

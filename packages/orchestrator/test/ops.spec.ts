@@ -444,4 +444,12 @@ describe("error labels", () => {
     expect(e.message).toContain("tmux not found")
     expect(e.category).toBe("execution")
   })
+
+  it("a bad tmux argument is validation: the caller sent it, the host never ran anything", async () => {
+    const { runner } = recording()
+    const { h } = withAudit(runner)
+    expect((await caught(h.tmuxRead({ host: "box-a", session: "bad name;", lines: 10 }))).category).toBe("validation")
+    expect((await caught(h.tmuxKeys({ host: "box-a", session: "s", keys: ["F13"] }))).category).toBe("validation")
+    expect((await caught(h.tmuxKeys({ host: "box-a", session: "s", keys: [] }))).category).toBe("validation")
+  })
 })

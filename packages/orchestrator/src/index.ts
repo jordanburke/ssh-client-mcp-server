@@ -60,7 +60,7 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
   version: `${number}.${number}.${number}`
 }
 
-/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
 const unwrap = <T>(result: Either<string, T>): T =>
   result.fold(
     (msg) => {
@@ -78,7 +78,7 @@ const noSummary = (): AuditFields => ({})
 // A non-zero exit is the failure signal, not stderr: many tools warn on stderr and exit 0. Neither
 // stream is dropped. On success, stderr follows stdout under a marker so warnings stay visible. A
 // failure leads with stderr, the usual one-line reason, then stdout, which often holds the context.
-/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
 const execOutput = (host: string, r: CommandResult): string => {
   if (r.code === 0) return r.stderr ? `${r.stdout}\n[stderr]\n${r.stderr}` : r.stdout
   const detail = r.stderr && r.stdout ? `${r.stderr}\n[stdout]\n${r.stdout}` : r.stderr || r.stdout
@@ -129,7 +129,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
         () => Promise.resolve(JSON.stringify(setupReport(setup, runner))),
         noSummary,
       ),
-    /** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+    /** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
     exec: async ({ host, command }: { host: string; command: string }): Promise<string> => {
       const r = await auditor
         .audited(

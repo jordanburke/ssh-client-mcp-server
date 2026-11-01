@@ -6,7 +6,7 @@
 
 **SSH Client MCP Server** is a local Model Context Protocol (MCP) server that lets LLMs and other MCP clients execute shell commands on remote hosts over SSH. It runs from Linux, macOS, or Windows and targets any reachable SSH server (Linux, macOS, Windows with OpenSSH, etc.).
 
-Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) — a functional MCP framework over FastMCP with telemetry, introspection, and backend abstraction.
+Built on [`somamcp`](https://github.com/sapientsai/SomaMCP) — a functional MCP framework on the MCP TypeScript SDK 2.x, with telemetry and introspection.
 
 ## Contents
 
@@ -52,7 +52,7 @@ No global install required — `npx` fetches and runs the latest published versi
 - **Smart path expansion** — `--key` supports `~`, `$VAR`, `${VAR}`, and relative paths via [`functype-os`](https://github.com/jordanburke/functype-os). Unresolved variables fail fast with a typed error.
 - **OS-user fallback** — `--user` defaults to the current OS username when omitted.
 - **Fail-fast auth** — the SSH key is loaded and validated at server startup, not on the first `exec` call.
-- **Introspection out-of-the-box** — `soma_health`, `soma_capabilities`, `soma_connections` auto-registered by somamcp.
+- **Introspection out-of-the-box** — an `info` tool, auto-registered by somamcp, reports the server's name, version, runtime, and tool counts.
 - **Cross-platform** — runs on Linux, macOS, Windows (anywhere Node 22+ runs).
 
 ## Tools
@@ -60,9 +60,7 @@ No global install required — `npx` fetches and runs the latest published versi
 | Tool                | Description                                                         |
 | ------------------- | ------------------------------------------------------------------- |
 | `exec`              | Execute a shell command on the remote SSH server and return stdout. |
-| `soma_health`       | Server uptime, status, active session count.                        |
-| `soma_capabilities` | Enumerate registered tools, resources, and prompts.                 |
-| `soma_connections`  | Gateway connection status (unused here).                            |
+| `info`              | Server name, version, runtime, and registered tool counts.          |
 
 ### Persistent sessions (tmux)
 

@@ -55,7 +55,7 @@ const verdictFields = (call: AuditCall): Readonly<Record<string, string>> =>
       }
     : { decision: "deny", rule: qualify(call.host, call.verdict.rule), reason: call.verdict.reason }
 
-/** @interop somamcp reports a tool failure to the client only when the handler throws UserError. */
+/** @interop a thrown UserError sets the message, category and suggestions the client sees; any other throw reaches it as an internal error. */
 export const createAuditor = ({ sink, now, newId }: AuditDeps): Auditor => {
   const write = (line: Readonly<Record<string, unknown>>, failure: string): void =>
     Try(() => sink(JSON.stringify(line))).fold(

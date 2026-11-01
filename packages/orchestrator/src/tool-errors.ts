@@ -1,3 +1,4 @@
+import { isTmuxInputError } from "@ssh-mcp/core"
 import { UserError } from "somamcp"
 
 // Every failure a host-routed tool reports carries its own label and hints. somamcp guesses a plain
@@ -8,11 +9,12 @@ export const UNKNOWN_HOST_HINT = "Call hosts_list for the configured host names.
 
 const isUnknownHost = (message: string): boolean => message.startsWith("unknown host")
 
-/** A tool result that failed (a tmux error, an exit code): the message says why, so no hints. */
-export const resultError = (message: string): UserError =>
-  isUnknownHost(message)
-    ? new UserError(message, { category: "not_found", suggestions: [UNKNOWN_HOST_HINT] })
-    : new UserError(message, { category: "execution", suggestions: [] })
+/** A tool result that failed (a bad tmux argument, a tmux error, an exit code): the message says why, so no hints. */
+export const resultError = (message: string): UserError => {
+  if (isUnknownHost(message)) return new UserError(message, { category: "not_found", suggestions: [UNKNOWN_HOST_HINT] })
+  if (isTmuxInputError(message)) return new UserError(message, { category: "validation", suggestions: [] })
+  return new UserError(message, { category: "execution", suggestions: [] })
+}
 
 /** A call the host's policy refused. */
 export const deniedError = (message: string): UserError =>
