@@ -54,8 +54,9 @@ describe("exec timeout over ssh2", () => {
     const before = { commands: seen.commands.length, connects: seen.connects }
     const r = await pool.run("h", "forever", { timeoutMs: 300 })
     expect(r).toEqual({ stdout: "partial", stderr: "warn", code: 124, timedOutMs: 300 })
-    // Give the KILL request time to arrive.
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // The KILL request arrives just after the result; wait for it, up to 2 s.
+    const deadline = Date.now() + 2_000
+    while (!seen.signals.includes("KILL") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
     expect(seen.signals).toContain("KILL")
     expect(seen.commands.length - before.commands).toBe(1)
     expect(seen.connects - before.connects).toBe(1)

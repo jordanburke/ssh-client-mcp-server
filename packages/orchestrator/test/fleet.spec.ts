@@ -244,6 +244,19 @@ ca = "home"
     }
   })
 
+  it("rejects a [pool] value that isn't a whole number from 1 to 2^31 - 1", () => {
+    const bad = (line: string): string =>
+      parseFleet(`[pool]\n${line}\n${base}`).fold(
+        (e) => e,
+        () => "",
+      )
+    expect(bad("exec_timeout_ms = 0")).toContain("pool.exec_timeout_ms must be a whole number from 1 to 2147483647")
+    expect(bad("max_exec_timeout_ms = -5")).toContain("pool.max_exec_timeout_ms must be")
+    expect(bad("exec_timeout_ms = 3000000000")).toContain("pool.exec_timeout_ms must be")
+    expect(bad("idle_timeout_ms = 1.5")).toContain("pool.idle_timeout_ms must be")
+    expect(bad('max_per_host = "2"')).toContain("pool.max_per_host must be")
+  })
+
   it("reads exec timeouts from [pool]", () => {
     const r = parseFleet(`[pool]\nexec_timeout_ms = 5000\nmax_exec_timeout_ms = 9000\n${base}`)
     if (r.isLeft()) throw new Error(r.value)

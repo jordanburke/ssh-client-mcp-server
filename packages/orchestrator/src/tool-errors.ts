@@ -1,4 +1,4 @@
-import { isTmuxInputError } from "@ssh-mcp/core"
+import { isTimedOutMessage, isTmuxInputError } from "@ssh-mcp/core"
 import { UserError } from "somamcp"
 
 // Every failure a host-routed tool reports carries its own label and hints. somamcp guesses a plain
@@ -13,6 +13,11 @@ const isUnknownHost = (message: string): boolean => message.startsWith("unknown 
 export const resultError = (message: string): UserError => {
   if (isUnknownHost(message)) return new UserError(message, { category: "not_found", suggestions: [UNKNOWN_HOST_HINT] })
   if (isTmuxInputError(message)) return new UserError(message, { category: "validation", suggestions: [] })
+  if (isTimedOutMessage(message))
+    return new UserError(message, {
+      category: "timeout",
+      suggestions: ["tmux took longer than [pool].exec_timeout_ms. Try again, or raise it."],
+    })
   return new UserError(message, { category: "execution", suggestions: [] })
 }
 

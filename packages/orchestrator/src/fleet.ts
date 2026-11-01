@@ -38,6 +38,15 @@ export type PoolSettings = Readonly<{
 export const DEFAULT_EXEC_TIMEOUT_MS = 600_000
 export const DEFAULT_MAX_EXEC_TIMEOUT_MS = 3_600_000
 
+// Only read when parsePool succeeded; errors are reported before this is used.
+const DEFAULT_POOL: PoolSettings = {
+  maxPerHost: 2,
+  idleTimeoutMs: 60000,
+  acquireTimeoutMs: 30000,
+  execTimeoutMs: DEFAULT_EXEC_TIMEOUT_MS,
+  maxExecTimeoutMs: DEFAULT_MAX_EXEC_TIMEOUT_MS,
+}
+
 export type AuditSettings = Readonly<{ path: string }>
 
 // Where a CA's private key comes from. Never the key itself: inline keys are rejected.
@@ -93,15 +102,36 @@ const resolveHostAuth = (name: string, h: RawHost): Either<string, HostAuth> => 
   return Right<string, HostAuth>({ auth, kind: modes[0] })
 }
 
-const parsePool = (raw: Record<string, unknown>): PoolSettings => {
+// Node's timers take at most 2^31 - 1 ms (about 24.8 days); a larger or non-positive delay fires at once.
+const MAX_TIMER_MS = 2 ** 31 - 1
+
+// Every [pool] value is a whole number from 1 to MAX_TIMER_MS. There is no "off" value: 0 would
+// make every exec time out at once.
+const poolValue = (p: Record<string, unknown>, key: string, fallback: number): Either<string, number> => {
+  const v = p[key]
+  if (v === undefined) return Right<string, number>(fallback)
+  return typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= MAX_TIMER_MS
+    ? Right<string, number>(v)
+    : Left<string, number>(`pool.${key} must be a whole number from 1 to ${MAX_TIMER_MS}`)
+}
+
+const parsePool = (raw: Record<string, unknown>): Either<string, PoolSettings> => {
   const p = (raw.pool ?? {}) as Record<string, unknown>
-  return {
-    maxPerHost: num(p.max_per_host).orElse(2),
-    idleTimeoutMs: num(p.idle_timeout_ms).orElse(60000),
-    acquireTimeoutMs: num(p.acquire_timeout_ms).orElse(30000),
-    execTimeoutMs: num(p.exec_timeout_ms).orElse(DEFAULT_EXEC_TIMEOUT_MS),
-    maxExecTimeoutMs: num(p.max_exec_timeout_ms).orElse(DEFAULT_MAX_EXEC_TIMEOUT_MS),
-  }
+  return poolValue(p, "max_per_host", 2).flatMap((maxPerHost) =>
+    poolValue(p, "idle_timeout_ms", 60000).flatMap((idleTimeoutMs) =>
+      poolValue(p, "acquire_timeout_ms", 30000).flatMap((acquireTimeoutMs) =>
+        poolValue(p, "exec_timeout_ms", DEFAULT_EXEC_TIMEOUT_MS).flatMap((execTimeoutMs) =>
+          poolValue(p, "max_exec_timeout_ms", DEFAULT_MAX_EXEC_TIMEOUT_MS).map((maxExecTimeoutMs) => ({
+            maxPerHost,
+            idleTimeoutMs,
+            acquireTimeoutMs,
+            execTimeoutMs,
+            maxExecTimeoutMs,
+          })),
+        ),
+      ),
+    ),
+  )
 }
 
 const validPrincipal = (p: string): boolean => p.length > 0 && !p.includes(",")
@@ -264,13 +294,14 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
     ),
     ...caNames.filter((n, i) => n !== "" && caNames.indexOf(n) < i).map((n) => `ca "${n}": duplicate name`),
   ]
+  const pool = parsePool(raw)
   const errors = [
     ...caErrors,
     ...defaultsPolicy.fold(
       (errs) => [...errs],
       () => [],
     ),
-    ...[audit, ...results].flatMap((r) =>
+    ...[pool, audit, ...results].flatMap((r) =>
       r.fold<string[]>(
         (msg) => [msg],
         () => [],
@@ -288,7 +319,7 @@ export const parseFleet = (toml: string): Either<string, Fleet> => {
     ? Left<string, Fleet>(`Fleet config errors:\n${List(errors).toArray().join("\n")}`)
     : Right<string, Fleet>({
         hosts,
-        pool: parsePool(raw),
+        pool: pool.orElse(DEFAULT_POOL),
         audit: audit.orElse({ path: DEFAULT_AUDIT_PATH }),
         cas: casResults.flatMap((r) =>
           r.fold<CaEntry[]>(

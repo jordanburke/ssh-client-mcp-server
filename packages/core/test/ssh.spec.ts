@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
-import { channelResult, execOutput, exitLabel } from "../src/ssh.js"
+import { channelResult, execOutput } from "../src/ssh.js"
+import { exitLabel, interpretAck, isTimedOutMessage } from "../src/tmux.js"
 
 const failure = (e: ReturnType<typeof execOutput>): string =>
   e.fold(
@@ -27,13 +28,10 @@ describe("channelResult", () => {
     expect(channelResult("", "", null, "SIGKILL")).toEqual({ stdout: "", stderr: "", code: 137, signal: "KILL" })
   })
 
-  it("still fails when ssh2 gives neither code nor signal", () => {
-    expect(channelResult("", "", undefined, undefined)).toEqual({
-      stdout: "",
-      stderr: "",
-      code: 255,
-      signal: "unknown",
-    })
+  it("fails, without claiming a signal, when the channel closes with no exit status", () => {
+    const r = channelResult("half", "", undefined, undefined)
+    expect(r).toEqual({ stdout: "half", stderr: "", code: 255, noExitStatus: true })
+    expect(exitLabel(r)).toBe("exit 255 (no exit status: channel closed)")
   })
 })
 
@@ -41,6 +39,24 @@ describe("exitLabel", () => {
   it("names the signal when there is one", () => {
     expect(exitLabel({ stdout: "", stderr: "", code: 1 })).toBe("exit 1")
     expect(exitLabel({ stdout: "", stderr: "", code: 137, signal: "KILL" })).toBe("exit 137 (signal KILL)")
+  })
+})
+
+describe("timeouts", () => {
+  const timedOut = { stdout: "", stderr: "", code: 124, timedOutMs: 5000 }
+
+  it("a tmux command that timed out says so, and the message is recognized", () => {
+    const msg = interpretAck("tmux send-keys")(timedOut).fold(
+      (m) => m,
+      () => "",
+    )
+    expect(msg).toBe("tmux send-keys timed out after 5000 ms")
+    expect(isTimedOutMessage(msg)).toBe(true)
+    expect(isTimedOutMessage(exitLabel(timedOut))).toBe(true)
+  })
+
+  it("other failures are not timeouts", () => {
+    expect(isTimedOutMessage("tmux send-keys failed: exit 1")).toBe(false)
   })
 })
 

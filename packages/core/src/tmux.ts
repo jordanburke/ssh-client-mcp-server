@@ -11,7 +11,21 @@ export type CommandResult = Readonly<{
   code: number
   signal?: string
   timedOutMs?: number
+  // The channel closed with no exit status (the connection dropped); code is then 255.
+  noExitStatus?: true
 }>
+
+/** "exit 1", "exit 137 (signal KILL)", "exit 255 (no exit status: channel closed)", or "timed out after 5000 ms". */
+export const exitLabel = (r: CommandResult): string => {
+  if (r.timedOutMs !== undefined) return `timed out after ${r.timedOutMs} ms`
+  if (r.noExitStatus === true) return `exit ${r.code} (no exit status: channel closed)`
+  return r.signal === undefined ? `exit ${r.code}` : `exit ${r.code} (signal ${r.signal})`
+}
+
+// Every message for a command that ran past its timeout carries this phrase, so callers can label it.
+const TIMED_OUT_RE = /\btimed out after \d+ ms\b/
+
+export const isTimedOutMessage = (message: string): boolean => TIMED_OUT_RE.test(message)
 
 export type TmuxRunner = (command: string) => Promise<CommandResult>
 
@@ -115,7 +129,8 @@ const NO_SERVER_RE = /no server running|error connecting to \S+ \(No such file o
 export const isTmuxMissing = (r: CommandResult): boolean =>
   r.code === 127 || /tmux: ([Cc]ommand )?not found/i.test(r.stderr)
 
-const failure = (label: string, r: CommandResult): string => `${label} failed: ${r.stderr.trim() || `exit ${r.code}`}`
+const failure = (label: string, r: CommandResult): string =>
+  r.timedOutMs === undefined ? `${label} failed: ${r.stderr.trim() || exitLabel(r)}` : `${label} ${exitLabel(r)}`
 
 export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<string>> => {
   if (isTmuxMissing(r)) return Left<string, ReadonlyArray<string>>(TMUX_MISSING_MSG)
