@@ -51,12 +51,13 @@ jobs:
       - name: Publish to npm
         run: npm publish "$RUNNER_TEMP"/pack/*.tgz --provenance --access public
 
-      # A publish that exits 0 can still leave a version whose tarball is missing.
+      # A publish that exits 0 can still leave a version whose tarball is missing. A healthy tarball
+      # can also take minutes: 0.2.0's took about 5, past the first version of this wait. So allow 30.
       - name: Verify the tarball landed
         run: |
           version="$(node -p "require('./package.json').version")"
           url="https://registry.npmjs.org/ssh-fleet-mcp-server/-/ssh-fleet-mcp-server-$version.tgz"
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+          for attempt in $(seq 1 120); do
             curl -fsIL "$url" > /dev/null && { echo "landed: $url"; exit 0; }
             echo "attempt $attempt: not there yet"
             sleep 15
