@@ -33,16 +33,21 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile
 
+      - name: Check the tag matches the version
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
       - name: Validate
         run: pnpm validate
 
-      - name: Verify package contents
+      - name: Pack and check the package
         run: |
-          echo "Files to be published:"
-          npm pack --dry-run
+          mkdir -p "$RUNNER_TEMP/pack"
+          node ../../scripts/check-package.mjs . --tarball-out="$RUNNER_TEMP/pack" --host=127.0.0.1 --user=check --password=check
 
+      # The tarball that was just checked, from pnpm pack: it resolves workspace: versions, and
+      # npm publish from this folder wouldn't.
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: npm publish "$RUNNER_TEMP"/pack/*.tgz --provenance --access public
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1

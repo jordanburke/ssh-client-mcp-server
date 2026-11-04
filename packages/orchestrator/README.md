@@ -449,14 +449,14 @@ With no `--config`, the server uses `~/.config/ssh-fleet/fleet.toml` and creates
 }
 ```
 
-Or via `npx` once published, with an explicit config (which must already exist):
+Or via `npx`, with an explicit config (which must already exist). Pin the version in the arguments, for the reason under [Installing on a hub](#installing-on-a-hub):
 
 ```json
 {
   "mcpServers": {
     "ssh-fleet": {
       "command": "npx",
-      "args": ["-y", "ssh-fleet-mcp-server", "--config=/path/to/fleet.toml"]
+      "args": ["-y", "ssh-fleet-mcp-server@<version>", "--config=/path/to/fleet.toml"]
     }
   }
 }
@@ -489,22 +489,23 @@ Use full paths. An MCP client launched from a GUI may not have Homebrew's `PATH`
 }
 ```
 
-### Installing before an npm release
+### Installing on a hub
 
-Until `ssh-fleet-mcp-server` is on npm, pack it on a machine with this repo, copy the tarball to the hub, and install it there:
+Pin a version, and update on purpose: this server holds SSH credentials, so a new version shouldn't arrive on its own at the next restart. In a terminal on the hub (not `ssh <hub> npm …`, which gets the bare `PATH` described under [macOS hosts](#macos-hosts) and won't find Homebrew's or nvm's `npm`):
+
+```sh
+npm install -g ssh-fleet-mcp-server@<version>
+```
+
+`npm uninstall -g ssh-fleet-mcp-server` removes it.
+
+To try a build that isn't released yet, pack it on a machine with this repo, copy the tarball to the hub, and install that the same way:
 
 ```sh
 cd packages/orchestrator && pnpm build && pnpm pack          # → ssh-fleet-mcp-server-<version>.tgz
 scp ssh-fleet-mcp-server-<version>.tgz <hub>:/tmp/
+npm install -g /tmp/ssh-fleet-mcp-server-<version>.tgz       # on the hub
 ```
-
-Then, in a terminal on the hub (not `ssh <hub> npm …`, which gets the bare `PATH` described under [macOS hosts](#macos-hosts) and won't find Homebrew's or nvm's `npm`):
-
-```sh
-npm install -g /tmp/ssh-fleet-mcp-server-<version>.tgz
-```
-
-`npm uninstall -g ssh-fleet-mcp-server` removes it. A later npm release replaces it the same way.
 
 ### Credentials: one key per hub and host
 

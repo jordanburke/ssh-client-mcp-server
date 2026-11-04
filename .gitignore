@@ -48,3 +48,6 @@ node_modules/
 
 # ts-builds generated reports
 .ts-builds/
+
+# Copied from the repo root by the connector's prepack script
+packages/connector/README.md

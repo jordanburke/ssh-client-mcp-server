@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest"
 import { type CommandResult } from "@ssh-mcp/core"
 
 import { createAuditor } from "../src/audit.js"
-import { makeHandlers } from "../src/index.js"
+import { makeHandlers } from "../src/handlers.js"
 import { EMPTY_TABLE, type HostPolicy, parsePolicyTable, resolvePolicy } from "../src/policy.js"
 import { parseFleet } from "../src/fleet.js"
 import { type FleetRunner } from "../src/runners.js"

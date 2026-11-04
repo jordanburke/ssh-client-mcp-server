@@ -1,0 +1,82 @@
+name: Publish ssh-fleet-mcp-server
+
+# Separate from publish.yml, which publishes the connector on v* tags. npm's trusted publisher for
+# this package names this file, so renaming it breaks publishing.
+on:
+  push:
+    tags:
+      - "fleet-v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # OIDC for npm trusted publishing and MCP Registry login
+    defaults:
+      run:
+        working-directory: packages/orchestrator
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the version
+        run: test "fleet-v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
+      - name: Validate
+        run: pnpm validate
+
+      - name: Pack and check the package
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack"
+          node ../../scripts/check-package.mjs . --tarball-out="$RUNNER_TEMP/pack"
+
+      # The tarball that was just checked, from pnpm pack: it resolves workspace: versions, and
+      # npm publish from this folder wouldn't.
+      - name: Publish to npm
+        run: npm publish "$RUNNER_TEMP"/pack/*.tgz --provenance --access public
+
+      # A publish that exits 0 can still leave a version whose tarball is missing.
+      - name: Verify the tarball landed
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          url="https://registry.npmjs.org/ssh-fleet-mcp-server/-/ssh-fleet-mcp-server-$version.tgz"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            curl -fsIL "$url" > /dev/null && { echo "landed: $url"; exit 0; }
+            echo "attempt $attempt: not there yet"
+            sleep 15
+          done
+          echo "::error::$url never answered"
+          exit 1
+
+      # Not marked latest: the repo's Latest release stays the connector's.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --title "ssh-fleet-mcp-server $GITHUB_REF_NAME" --generate-notes --latest=false
+
+      - name: Install MCP Publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.7.8/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          chmod +x ./mcp-publisher
+
+      - name: Login to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
