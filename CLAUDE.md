@@ -12,7 +12,7 @@ This is a **pnpm monorepo** containing three packages:
 | `packages/connector` | `ssh-client-mcp-server` | Single-host MCP server — `exec` + `tmux_*` tools for one SSH host, configured via CLI flags. |
 | `packages/orchestrator` | `ssh-fleet-mcp-server` | Multi-host fleet MCP server — `hosts_list`, `fleet_setup` + host-routed `exec`/`tmux_*` tools and a `check` subcommand, driven by a TOML fleet config (`--config=` flag or `SSH_FLEET_CONFIG` env or `~/.config/ssh-fleet/fleet.toml`). |
 
-Both servers consume `@ssh-mcp/core` for all SSH and tmux logic. Run the full suite with `pnpm -r validate`.
+Both servers consume `@ssh-mcp/core` for all SSH and tmux logic. Run the full suite with `pnpm -r validate`. After a build, `pnpm check:package` packs both servers, inspects the tarballs, installs them, and starts them through npm's bin link.
 
 The connector package (`ssh-client-mcp-server`) retains its original published identity and public API unchanged.
 
@@ -64,9 +64,9 @@ Multi-host fleet MCP server. Entry point: `src/index.ts`.
 - **`template.ts`** — `FLEET_TEMPLATE`, the all-comments starter config; `test/template.spec.ts` checks every example block parses once uncommented.
 - **`setup.ts`** — first-start steps and setup reporting: `resolveConfigPath`, `ensureConfig` (creates the template at the default path only), `ensureCaKeyFiles` (creates a missing CA `key_file`), `setupReport` (the `fleet_setup` answer; never includes a password value or `key_cmd` string).
 - **`build-info.ts`** — `buildInfo()`, the commit/branch/date that `tsdown.config.ts` injects through `define` (`__FLEET_BUILD__`) and `createServer({ build })` returns from `info`; empty in unbuilt source.
-- **`entry.ts`** — `isEntryPoint`: runs `main()` only when this module is the program, comparing real paths so npm's `node_modules/.bin` symlink (npx, global installs) counts.
 - **`check.ts`** — `runCheck` for the `check` subcommand: runs `true` on every host as the operator (policy skipped, audited with `bypass: "policy"`), using its own `<runtime_dir>-check`.
-- **`src/index.ts`** — `makeHandlers` + server wiring, and `check` dispatch. Registers `hosts_list`, `fleet_setup` (read-only, no params), `exec`, `tmux_list`, `tmux_send`, `tmux_read`, `tmux_keys` (all but the first two with a required `host` param). Config and key creation run only in `main()` before the server starts; no tool writes.
+- **`handlers.ts`** — `makeHandlers`, the tool handlers, tested with a fake `FleetRunner`.
+- **`src/index.ts`** — the bin: export-free, always runs `main()` or `check`, as the connector's does. Wires the server. Registers `hosts_list`, `fleet_setup` (read-only, no params), `exec`, `tmux_list`, `tmux_send`, `tmux_read`, `tmux_keys` (all but the first two with a required `host` param). Config and key creation run only in `main()` before the server starts; no tool writes.
 - **Config discovery**: `--config=<path>` → `SSH_FLEET_CONFIG` env → `~/.config/ssh-fleet/fleet.toml`. Only the default path is created on first start; a missing explicit path fails startup. Zero hosts is a valid config.
 
 ### Key Dependencies (shared)

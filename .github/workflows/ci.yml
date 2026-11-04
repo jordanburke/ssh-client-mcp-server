@@ -27,3 +27,6 @@ jobs:
 
       - name: Run CI Pipeline
         run: pnpm run validate
+
+      - name: Check the packages install and start
+        run: pnpm run check:package

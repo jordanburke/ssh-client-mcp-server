@@ -1,9 +1,33 @@
 {
   "name": "ssh-fleet-mcp-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "MCP server that manages a fleet of SSH hosts: pooled connections and host-routed exec/tmux tools.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
+  "homepage": "https://github.com/jordanburke/ssh-client-mcp-server/tree/main/packages/orchestrator#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jordanburke/ssh-client-mcp-server.git",
+    "directory": "packages/orchestrator"
+  },
+  "bugs": {
+    "url": "https://github.com/jordanburke/ssh-client-mcp-server/issues"
+  },
+  "keywords": [
+    "mcp",
+    "ssh",
+    "ssh2",
+    "model-context-protocol",
+    "claude",
+    "fleet",
+    "audit",
+    "policy",
+    "certificate-authority",
+    "tmux",
+    "typescript",
+    "cli"
+  ],
+  "mcpName": "io.github.jordanburke/ssh-fleet-mcp-server",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",

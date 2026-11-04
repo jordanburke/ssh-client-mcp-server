@@ -64,7 +64,8 @@
     "dev": "ts-builds dev",
     "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js",
     "check:versions": "tsx scripts/check-versions.ts",
-    "prepublishOnly": "pnpm check:versions && pnpm validate"
+    "prepublishOnly": "pnpm check:versions && pnpm validate",
+    "prepack": "node -e \"require('node:fs').copyFileSync('../../README.md', 'README.md')\""
   },
   "prettier": "ts-builds/prettier",
   "dependencies": {

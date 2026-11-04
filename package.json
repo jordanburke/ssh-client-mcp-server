@@ -12,7 +12,8 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "format": "pnpm -r format",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "check:package": "node scripts/check-package.mjs packages/orchestrator && node scripts/check-package.mjs packages/connector --host=127.0.0.1 --user=check --password=check"
   },
   "devDependencies": {
     "ts-builds": "^4.0.0",
