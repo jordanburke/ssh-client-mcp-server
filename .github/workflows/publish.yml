@@ -49,6 +49,21 @@ jobs:
       - name: Publish to npm
         run: npm publish "$RUNNER_TEMP"/pack/*.tgz --provenance --access public
 
+      # A publish that exits 0 can still leave a version whose tarball is missing, and npm can take
+      # minutes to finish processing one. The MCP Registry step below reads this version from npm and
+      # fails if it isn't there yet.
+      - name: Verify the tarball landed
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          url="https://registry.npmjs.org/ssh-client-mcp-server/-/ssh-client-mcp-server-$version.tgz"
+          for attempt in $(seq 1 120); do
+            curl -fsIL "$url" > /dev/null && { echo "landed: $url"; exit 0; }
+            echo "attempt $attempt: not there yet"
+            sleep 15
+          done
+          echo "::error::$url never answered"
+          exit 1
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
