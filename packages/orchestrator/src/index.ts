@@ -33,6 +33,7 @@ import {
   createAuditor,
   excerpt,
   openAuditLog,
+  reportedClient,
 } from "./audit.js"
 import { buildInfo } from "./build-info.js"
 import { checkRuntimeDir, readCheckConfig, runCheck } from "./check.js"
@@ -385,8 +386,19 @@ async function main(): Promise<void> {
     runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
     knownHosts: ca.map((wiring) => wiring.knownHosts),
   }
-  const client = clientLabel(process.env[CLIENT_LABEL_ENV]).orUndefined()
-  const h = makeHandlers(runner, createAuditor({ sink, now: () => new Date(), newId: randomUUID, client }), setup)
+  const label = clientLabel(process.env[CLIENT_LABEL_ENV])
+  // The client is known per call, so each call gets handlers whose auditor records it.
+  const handlers = (context: Readonly<{ client: Parameters<typeof reportedClient>[0] }>) =>
+    makeHandlers(
+      runner,
+      createAuditor({
+        sink,
+        now: () => new Date(),
+        newId: randomUUID,
+        client: label.or(reportedClient(context.client)).orUndefined(),
+      }),
+      setup,
+    )
   const server = createServer({
     name: "ssh-fleet-mcp-server",
     version: pkgVersion,
@@ -403,14 +415,14 @@ async function main(): Promise<void> {
     description:
       "List configured fleet hosts and their live connection status. If a host you expect is missing, call fleet_setup: the config may have changed since the server started.",
     parameters: z.object({}),
-    execute: () => h.hostsList(),
+    execute: (_args, context) => handlers(context).hostsList(),
   })
   server.addTool({
     name: "fleet_setup",
     description:
       "Show setup state: config path, each host's connection state and last error, each CA's public key and the line to add on hosts, and what to do next. Read-only.",
     parameters: z.object({}),
-    execute: () => h.fleetSetup(),
+    execute: (_args, context) => handlers(context).fleetSetup(),
   })
   server.addTool({
     name: "exec",
@@ -427,13 +439,13 @@ async function main(): Promise<void> {
           `How long to wait, in ms. Default ${fleet.pool.execTimeoutMs}; at most ${fleet.pool.maxExecTimeoutMs}, and a larger value is lowered to it. On timeout the call fails with the output so far, and the command may still be running. For longer jobs, run them in tmux (tmux_send, then tmux_read).`,
         ),
     }),
-    execute: ({ host, command, timeout_ms }) => h.exec({ host, command, timeout_ms }),
+    execute: ({ host, command, timeout_ms }, context) => handlers(context).exec({ host, command, timeout_ms }),
   })
   server.addTool({
     name: "tmux_list",
     description: "List tmux sessions on a fleet host. Returns a JSON array of session names.",
     parameters: z.object({ host: hostParam }),
-    execute: ({ host }) => h.tmuxList({ host }),
+    execute: ({ host }, context) => handlers(context).tmuxList({ host }),
   })
   server.addTool({
     name: "tmux_send",
@@ -444,7 +456,8 @@ async function main(): Promise<void> {
       input: z.string().min(1).describe("Text to type"),
       submit: z.boolean().optional().describe("Press Enter after the text (default true)"),
     }),
-    execute: ({ host, session, input, submit }) => h.tmuxSend({ host, session, input, submit }),
+    execute: ({ host, session, input, submit }, context) =>
+      handlers(context).tmuxSend({ host, session, input, submit }),
   })
   server.addTool({
     name: "tmux_read",
@@ -454,7 +467,7 @@ async function main(): Promise<void> {
       session: z.string().optional().describe("tmux session (defaults to the host's configured session)"),
       lines: z.number().int().min(1).optional().describe("Lines of scrollback (default 200; capped at 2000)"),
     }),
-    execute: ({ host, session, lines }) => h.tmuxRead({ host, session, lines }),
+    execute: ({ host, session, lines }, context) => handlers(context).tmuxRead({ host, session, lines }),
   })
   server.addTool({
     name: "tmux_keys",
@@ -464,7 +477,7 @@ async function main(): Promise<void> {
       session: z.string().optional().describe("tmux session (defaults to the host's configured session)"),
       keys: z.array(z.string()).min(1).describe("tmux key names, e.g. ['C-c']"),
     }),
-    execute: ({ host, session, keys }) => h.tmuxKeys({ host, session, keys }),
+    execute: ({ host, session, keys }, context) => handlers(context).tmuxKeys({ host, session, keys }),
   })
 
   await server.start({ transportType: "stdio" })

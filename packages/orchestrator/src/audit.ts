@@ -30,12 +30,23 @@ export type Auditor = Readonly<{
   audited: <A>(call: AuditCall, run: () => Promise<A>, summarize: (a: A) => AuditFields) => Promise<A>
 }>
 
-// `client` is the label the operator gave this server's client (SSH_FLEET_CLIENT). It is recorded
-// beside `agent`, never in its place: it is configuration the client can set, not a verified identity,
-// so policy never sees it.
+// `client` says which client made the call: the operator's label (SSH_FLEET_CLIENT), else the name
+// and version the client sent in its handshake. It is recorded beside `agent`, never in its place:
+// neither source is a verified identity, so policy never sees it.
 export type AuditDeps = Readonly<{ sink: AuditSink; now: () => Date; newId: () => string; client?: string }>
 
 export const CLIENT_LABEL_ENV = "SSH_FLEET_CLIENT"
+
+/**
+ * The client's `name/version` from its handshake, cleaned like a label. A version alone names nothing.
+ * @interop takes somamcp's `context.client`, whose fields are string | undefined.
+ */
+export const reportedClient = (
+  reported: Readonly<{ name?: string | undefined; version: string | undefined }>,
+): Option<string> =>
+  Option(reported.name).flatMap((name) =>
+    clientLabel(reported.version === undefined ? name : `${name}/${reported.version}`),
+  )
 
 /**
  * A label from the environment: trimmed, control characters removed, at most 64 characters; empty means none.

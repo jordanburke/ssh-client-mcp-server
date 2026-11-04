@@ -13,6 +13,7 @@ import {
   clientLabel,
   createAuditor,
   excerpt,
+  reportedClient,
   openAuditLog,
 } from "../src/audit.js"
 import { ALLOW, type Verdict } from "../src/policy.js"
@@ -240,6 +241,19 @@ describe("client label", () => {
       () => ({}),
     )
     expect(JSON.parse(lines[0])).not.toHaveProperty("client")
+  })
+
+  it("reads name/version from the handshake, and needs the name", () => {
+    expect(reportedClient({ name: "claude-code", version: "2.1.0" }).orElse("")).toBe("claude-code/2.1.0")
+    expect(reportedClient({ name: "claude-code", version: undefined }).orElse("")).toBe("claude-code")
+    expect(reportedClient({ version: "2.1.0" }).isNone()).toBe(true)
+    expect(reportedClient({ name: undefined, version: undefined }).isNone()).toBe(true)
+  })
+
+  it("cleans a self-reported name like a label", () => {
+    expect(reportedClient({ name: "evil\n\u0007name", version: "1" }).orElse("")).toBe("evilname/1")
+    expect(reportedClient({ name: "x".repeat(100), version: "1" }).orElse("")).toHaveLength(64)
+    expect(reportedClient({ name: "  ", version: undefined }).isNone()).toBe(true)
   })
 
   it("cleans the environment value", () => {

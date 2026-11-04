@@ -210,8 +210,8 @@ importers:
         specifier: ^1.16.0
         version: 1.16.0(functype@1.16.0)
       somamcp:
-        specifier: ^2.4.0
-        version: 2.4.0
+        specifier: ^2.5.0
+        version: 2.5.0
       ssh2:
         specifier: ^1.17.0
         version: 1.17.0
@@ -247,8 +247,8 @@ importers:
         specifier: ^1.16.0
         version: 1.16.0(functype@1.16.0)
       somamcp:
-        specifier: ^2.4.0
-        version: 2.4.0
+        specifier: ^2.5.0
+        version: 2.5.0
       ssh2:
         specifier: ^1.17.0
         version: 1.17.0
@@ -278,8 +278,8 @@ importers:
         specifier: ^1.9.1
         version: 1.9.1
       somamcp:
-        specifier: ^2.4.0
-        version: 2.4.0
+        specifier: ^2.5.0
+        version: 2.5.0
       ssh2:
         specifier: ^1.17.0
         version: 1.17.0
@@ -1997,8 +1997,8 @@ packages:
     resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
     engines: {node: '>= 18'}
 
-  somamcp@2.4.0:
-    resolution: {integrity: sha512-37Ss5AHCgpDyBUIp1P9w2CQEk98YBhIMpFsahAau10KNoFIGrDpMilY7SHIEOZJ+SZQjT0b/zVkRJahJxQ14Vw==}
+  somamcp@2.5.0:
+    resolution: {integrity: sha512-diW4XTBCIC1DR+J1BpCCZlLUPLWrYV8SWrDDQ/MYllTjnCeem/Kwq+1XIEm6w/p4eMgRPkuoDKJ7nMFfllw0HQ==}
 
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
@@ -3680,7 +3680,7 @@ snapshots:
 
   smol-toml@1.9.1: {}
 
-  somamcp@2.4.0:
+  somamcp@2.5.0:
     dependencies:
       '@hono/node-server': 2.1.5(hono@4.13.13)
       '@modelcontextprotocol/client': 2.4.0
