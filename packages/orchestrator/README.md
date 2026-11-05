@@ -305,17 +305,21 @@ Every tool call that runs writes two JSON lines to the audit log (see [`[audit]`
 
 What each tool records:
 
-| Tool         | Decision line                | Result line                                                                           |
-| ------------ | ---------------------------- | ------------------------------------------------------------------------------------- |
-| `hosts_list` | (no `host`)                  | —                                                                                     |
-| `exec`       | `command`                    | `code`, `stdout_bytes`, `stderr_bytes`; plus excerpts when the host sets `log_output` |
-| `tmux_list`  | —                            | —                                                                                     |
-| `tmux_send`  | `session`, `input`, `submit` | —                                                                                     |
-| `tmux_read`  | `session`, `lines`           | `stdout_bytes` (never the transcript)                                                 |
-| `tmux_keys`  | `session`, `keys`            | —                                                                                     |
+| Tool         | Decision line                  | Result line                                                                                                                                         |
+| ------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hosts_list` | (no `host`)                    | —                                                                                                                                                   |
+| `exec`       | `command`, `timeout_ms` if set | `code`, `stdout_bytes`, `stderr_bytes`; `signal`, `timed_out_ms` or `no_exit_status` when they apply; plus excerpts when the host sets `log_output` |
+| `tmux_list`  | —                              | —                                                                                                                                                   |
+| `tmux_send`  | `session`, `input`, `submit`   | —                                                                                                                                                   |
+| `tmux_read`  | `session`, `lines`             | `stdout_bytes` (never the transcript)                                                                                                               |
+| `tmux_keys`  | `session`, `keys`              | —                                                                                                                                                   |
 
 - **Sizes, not contents.** Output can contain secrets, so only byte counts are logged. A host with `log_output = true` also gets `stdout_excerpt` / `stderr_excerpt` (first 1024 characters) on `exec`.
-- **`status`** is `"ok"` when the call completed (an `exec` with a non-zero exit is still `"ok"`, with its `code`) and `"error"` with an `error` message when it didn't, for example an unknown host.
+- **`status`** says whether the call finished, not whether the command succeeded.
+  - It is `"ok"` when the call finished. That includes an `exec` whose command exited non-zero or was ended by a signal, so `grep` with no match doesn't read as a fault. Check `code` for those.
+  - It is `"error"` with an `error` message when the call didn't finish: an unknown host, a command stopped at its timeout (`timed_out_ms`), or a connection that dropped before the exit status arrived (`no_exit_status`). A timeout or dropped connection keeps its `code` and sizes.
+  - On a `ca` host, OpenSSH's `ssh` reports a dropped connection as plain `exit 255`, which can't be told apart from a command's own exit. That line reads `"ok"` with `code` 255.
+- **Finding failures.** This filter finds every call that ran and failed, whether the command failed or the call never finished: `jq -c 'select(.event == "result" and (.status == "error" or (.code // 0) != 0))' audit.jsonl`. A denied call has no result line, so find those with `select(.decision == "deny")`.
 - **`decision`** is `"allow"` or `"deny"`. **`rule`** names the policy rule that decided, qualified by host (`box-a:readonly`); it is absent when no policy applies (`hosts_list`, an unknown host). A deny line also has a **`reason`**.
 - **`agent`** is `"unknown"` until per-agent identity lands.
 - **`client`** says which client made the call. It is `SSH_FLEET_CLIENT` from the server's environment if set (put it in the client's MCP config `env` block, for example `claude-code@mac-mini`), else the `name/version` the client sent in its MCP handshake, for example `claude-code/2.1.0`. Either way it has control characters removed and is at most 64 characters, and the field is left out when neither exists. It tells clients apart in the log. A client can claim any name, so it isn't a verified identity, and policy's `agents` never matches it.

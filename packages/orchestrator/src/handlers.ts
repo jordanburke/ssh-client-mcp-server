@@ -1,7 +1,7 @@
 import { type CommandResult, execOutput, tmuxKeys, tmuxList, tmuxRead, tmuxSend } from "@ssh-mcp/core"
 import { type Either, Option } from "functype"
 
-import { AGENT_UNKNOWN, type AuditCall, type AuditFields, type Auditor, excerpt } from "./audit.js"
+import { AGENT_UNKNOWN, type AuditCall, type AuditFields, type Auditor, excerpt, unfinishedFields } from "./audit.js"
 import { ALLOW, evaluate, type PolicyRequest, type Verdict } from "./policy.js"
 import { type FleetRunner, hostRows } from "./runners.js"
 import { type SetupContext, setupReport } from "./setup.js"
@@ -47,6 +47,7 @@ export const makeHandlers = (runner: FleetRunner, auditor: Auditor, setup: Setup
   const summarizeExec =
     (host: string) =>
     (r: CommandResult): AuditFields => ({
+      ...unfinishedFields(r),
       code: r.code,
       ...(r.signal === undefined ? {} : { signal: r.signal }),
       ...(r.timedOutMs === undefined ? {} : { timed_out_ms: r.timedOutMs }),
