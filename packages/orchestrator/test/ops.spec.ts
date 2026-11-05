@@ -139,6 +139,47 @@ describe("orchestrator handlers", () => {
       expect(parsed()[1]).toMatchObject({ event: "result", status: "ok", code: 5 })
     })
 
+    describe("the audit line of a failed exec", () => {
+      const auditLine = async (result: CommandResult) => {
+        const { h, parsed } = withAudit(recording(result).runner)
+        await expect(h.exec({ host: "box-a", command: "x" })).rejects.toThrow()
+        return parsed()[1]
+      }
+
+      it("a non-zero exit finished, so it stays ok", async () => {
+        const line = await auditLine({ stdout: "out\n", stderr: "bad\n", code: 3 })
+        expect(line).toMatchObject({ status: "ok", code: 3, stdout_bytes: 4, stderr_bytes: 4 })
+        expect(line).not.toHaveProperty("error")
+      })
+
+      it("a command a signal ended finished, so it stays ok and names the signal", async () => {
+        const line = await auditLine({ stdout: "", stderr: "", code: 137, signal: "KILL" })
+        expect(line).toMatchObject({ status: "ok", code: 137, signal: "KILL" })
+        expect(line).not.toHaveProperty("error")
+      })
+
+      it("a timeout never finished, so it is an error that keeps the code and sizes", async () => {
+        expect(await auditLine({ stdout: "before\n", stderr: "", code: 124, timedOutMs: 2000 })).toMatchObject({
+          status: "error",
+          error: "timed out after 2000 ms",
+          code: 124,
+          timed_out_ms: 2000,
+          stdout_bytes: 7,
+          stderr_bytes: 0,
+        })
+      })
+
+      it("a dropped connection never finished, so it is an error that keeps the code and sizes", async () => {
+        expect(await auditLine({ stdout: "before\n", stderr: "", code: 255, noExitStatus: true })).toMatchObject({
+          status: "error",
+          error: "exit 255 (no exit status: channel closed)",
+          code: 255,
+          no_exit_status: true,
+          stdout_bytes: 7,
+        })
+      })
+    })
+
     it("a non-zero exit with no stderr is still an error, with stdout", async () => {
       await expect(run({ stdout: "partial\n", stderr: "", code: 2 })).rejects.toThrow("[box-a] exit 2:\npartial")
     })

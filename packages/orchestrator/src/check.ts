@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { type CommandResult } from "@ssh-mcp/core"
 import { type Either, Left, type Map, Option, Right, Try } from "functype"
 
-import { type Auditor } from "./audit.js"
+import { type Auditor, unfinishedFields } from "./audit.js"
 import { type Fleet, type HostEntry } from "./fleet.js"
 import { ALLOW } from "./policy.js"
 import { type FleetRunner } from "./runners.js"
@@ -70,7 +70,7 @@ export const runCheck = async (deps: CheckDeps): Promise<number> => {
       .audited(
         { agent: "operator", tool: "check", host: Option(h.name), fields: { bypass: "policy" }, verdict: ALLOW },
         () => deps.runner.exec(h.name, "true", "operator"),
-        (r) => ({ code: r.code }),
+        (r) => ({ ...unfinishedFields(r), code: r.code }),
       )
       .then(
         (r) => outcomeOf(r, startedAt),

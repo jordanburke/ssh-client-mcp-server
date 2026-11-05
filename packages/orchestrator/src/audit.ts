@@ -1,6 +1,7 @@
 import { closeSync, constants, fchmodSync, fstatSync, mkdirSync, openSync, writeSync } from "node:fs"
 import { dirname } from "node:path"
 
+import { type CommandResult, exitLabel } from "@ssh-mcp/core"
 import { type Either, Left, Option, Right, Try, type Wire } from "functype"
 import { Path } from "functype-os"
 import { UserError } from "somamcp"
@@ -63,6 +64,11 @@ export const clientLabel = (raw: string | undefined): Option<string> =>
 
 // The first EXCERPT_CHARS code points, so a surrogate pair is never split.
 export const excerpt = (s: string): string => Array.from(s).slice(0, EXCERPT_CHARS).join("")
+
+// A command that returned without finishing: the server stopped waiting, or the connection dropped.
+// A summary spreads these in to override the "ok" of a call that resolved.
+export const unfinishedFields = (r: CommandResult): AuditFields =>
+  r.timedOutMs === undefined && r.noExitStatus !== true ? {} : { status: "error", error: exitLabel(r) }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
