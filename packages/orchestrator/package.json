@@ -1,6 +1,6 @@
 {
   "name": "ssh-fleet-mcp-server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "MIT",
   "description": "MCP server that manages a fleet of SSH hosts: pooled connections and host-routed exec/tmux tools.",
   "author": "Jordan Burke <jordan.burke@gmail.com>",
