@@ -72,11 +72,11 @@ describe("runCheck", () => {
   it("a probe that never finished is an error in the audit log", async () => {
     const t = harness(twoHosts, async () => ({ stdout: "", stderr: "", code: 255, noExitStatus: true }))
     expect(await t.run()).toBe(1)
-    t.audit()
-      .filter((l) => l.event === "result")
-      .forEach((l) =>
-        expect(l).toMatchObject({ status: "error", error: "exit 255 (no exit status: channel closed)", code: 255 }),
-      )
+    const results = t.audit().filter((l) => l.event === "result")
+    expect(results.map((l) => l.host).sort()).toEqual(["mini", "nas"])
+    results.forEach((l) =>
+      expect(l).toMatchObject({ status: "error", error: "exit 255 (no exit status: channel closed)", code: 255 }),
+    )
   })
 
   it("check writes an audit line per host", async () => {
