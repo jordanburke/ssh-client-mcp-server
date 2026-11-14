@@ -2,6 +2,8 @@
 // Checks the artifact npm would ship, not the manifest that describes it: pack the package, look
 // inside the tarball, install it, and start it through npm's bin link over stdio.
 // Usage: node scripts/check-package.mjs <package dir> [--tarball-out=<dir>] [server args...]
+// `check:package` starts the connector with no flags, as Glama starts it to list its tools, and again with
+// valid ones: it must answer both ways.
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { execFileSync, spawn } from "node:child_process"
 import { builtinModules } from "node:module"

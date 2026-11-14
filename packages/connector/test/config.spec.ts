@@ -5,7 +5,14 @@ import { join } from "node:path"
 import { Option } from "functype"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 
-import { effectiveUser, parseArgv, type ResolveAuthOptions, resolveAuth, validateConfig } from "../src/config.js"
+import {
+  effectiveUser,
+  parseArgv,
+  type ResolveAuthOptions,
+  resolveAuth,
+  resolveSshConfig,
+  validateConfig,
+} from "../src/config.js"
 
 const auth = (overrides: Partial<ResolveAuthOptions> = {}): ResolveAuthOptions => ({
   password: Option.none<string>(),
@@ -268,5 +275,28 @@ describe("resolveAuth", () => {
       if (priorSock === undefined) delete process.env.SSH_AUTH_SOCK
       else process.env.SSH_AUTH_SOCK = priorSock
     }
+  })
+})
+
+describe("resolveSshConfig", () => {
+  it("builds the connection from valid flags", async () => {
+    const r = await resolveSshConfig(parseArgv(["--host=box", "--port=2222", "--user=deploy", "--password=pw"]))
+    expect(r.orThrow()).toEqual({ host: "box", port: 2222, username: "deploy", password: "pw" })
+  })
+
+  it("defaults the port to 22", async () => {
+    const r = await resolveSshConfig(parseArgv(["--host=box", "--user=deploy", "--password=pw"]))
+    expect(r.orThrow().port).toBe(22)
+  })
+
+  // Registries such as Glama start the server with no flags and list its tools.
+  it("gives the reason, and doesn't throw, with no flags at all", async () => {
+    const r = await resolveSshConfig(parseArgv([]))
+    expect(r.isLeft() && r.value).toContain("Missing required --host")
+  })
+
+  it("gives the reason when auth can't resolve", async () => {
+    const r = await resolveSshConfig(parseArgv(["--host=box", "--user=deploy", "--key=/nonexistent/key"]))
+    expect(r.isLeft() && r.value).toContain("Failed to read SSH key")
   })
 })

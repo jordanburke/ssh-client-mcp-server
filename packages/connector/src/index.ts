@@ -17,7 +17,7 @@ import { createServer, UserError } from "somamcp/node"
 import { type ConnectConfig } from "ssh2"
 import { z } from "zod"
 
-import { effectiveUser, parseArgv, resolveAuth, validateConfig } from "./config.js"
+import { parseArgv, resolveSshConfig } from "./config.js"
 
 // Single source of truth for the server version: read the package's own
 // package.json at runtime so it can never drift from the published version.
@@ -30,34 +30,26 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
 async function main() {
   const argv = parseArgv(process.argv.slice(2))
 
-  validateConfig(argv).fold(
-    (err) => {
-      console.error(err)
-      process.exit(1)
-    },
+  // A bad config doesn't stop startup: the server starts and lists its tools, and each tool call
+  // fails with the reason. A client then shows the problem where the model sees it, and registries
+  // that start the server with no flags (Glama) can still list its tools.
+  const config = await resolveSshConfig(argv)
+  config.fold(
+    (err) => console.error(`warning: ${err}\nexec and the tmux tools fail until the flags are fixed.`),
     () => undefined,
   )
 
-  const { host } = argv
-  const user = effectiveUser(argv).orThrow(new Error("user unavailable after validation"))
-  const port = Option(argv.port).map(Number).orElse(22)
-  const password = Option(argv.password)
-  const keyPath = Option(argv.key)
-  const keyEnvVar = Option(argv["key-env"])
-  const useAgent = Option(argv.agent)
-    .map((v) => v === "true" || v === "1" || v === "yes")
-    .orElse(false)
-
-  const authResult = await resolveAuth({ password, keyPath, keyEnvVar, useAgent })
-  const authConfig = authResult.fold<Partial<ConnectConfig>>(
-    (err) => {
-      console.error(err)
-      process.exit(1)
-    },
-    (cfg) => cfg,
-  )
-
-  const sshConfig: ConnectConfig = { host, port, username: user, ...authConfig }
+  /** @interop a thrown UserError sets the message, category and suggestions the client sees. */
+  const sshConfig = (): ConnectConfig =>
+    config.fold(
+      (err) => {
+        throw new UserError(`The server's SSH settings are invalid, so it can't connect.\n${err}`, {
+          category: "internal",
+          suggestions: ["Fix the server's command-line flags in the MCP client's config, then restart the server."],
+        })
+      },
+      (c) => c,
+    )
 
   const server = createServer({
     name: "ssh-client-mcp-server",
@@ -80,17 +72,22 @@ async function main() {
     parameters: z.object({
       command: z.string().min(1).describe("Shell command to execute on the remote SSH server"),
     }),
-    execute: async ({ command }) => unwrap(execOutput(await execSshResult(sshConfig, command))),
+    execute: async ({ command }) => unwrap(execOutput(await execSshResult(sshConfig(), command))),
   })
 
   const defaultSession = Option(argv["tmux-session"]).orElse("agent")
-  const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig, command)
+  // Built per call, before core validates a session name or key, so a bad server config is always
+  // the reason reported.
+  const tmuxRunner = (): TmuxRunner => {
+    const ssh = sshConfig()
+    return (command) => execSshResult(ssh, command)
+  }
 
   server.addTool({
     name: "tmux_list",
     description: "List live tmux sessions on the remote host. Returns a JSON array of session names.",
     parameters: z.object({}),
-    execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner))),
+    execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner()))),
   })
 
   server.addTool({
@@ -104,7 +101,7 @@ async function main() {
     }),
     execute: async ({ session, input, submit }) => {
       const target = session ?? defaultSession
-      unwrap(await tmuxSend(tmuxRunner, { session: target, input, submit: submit ?? true }))
+      unwrap(await tmuxSend(tmuxRunner(), { session: target, input, submit: submit ?? true }))
       return `Sent to tmux session "${target}".`
     },
   })
@@ -122,7 +119,7 @@ async function main() {
         .describe("Lines of scrollback to capture (default 200; capped at 2000)"),
     }),
     execute: async ({ session, lines }) =>
-      unwrap(await tmuxRead(tmuxRunner, { session: session ?? defaultSession, lines: lines ?? 200 })),
+      unwrap(await tmuxRead(tmuxRunner(), { session: session ?? defaultSession, lines: lines ?? 200 })),
   })
 
   server.addTool({
@@ -135,7 +132,7 @@ async function main() {
     }),
     execute: async ({ session, keys }) => {
       const target = session ?? defaultSession
-      unwrap(await tmuxKeys(tmuxRunner, { session: target, keys }))
+      unwrap(await tmuxKeys(tmuxRunner(), { session: target, keys }))
       return `Sent keys [${keys.join(", ")}] to tmux session "${target}".`
     },
   })

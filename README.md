@@ -116,6 +116,8 @@ The server reads SSH connection info from CLI flags:
 
 \*Auth precedence is `--password` → `--key` → `--key-env` → `--agent`. If none are set the server starts but ssh2 will fail to authenticate on first `exec`.
 
+A missing `--host`, a bad flag, or a `--key` that can't be read doesn't stop the server either. It prints a warning on stderr, starts, and lists its tools. Until the flags are fixed, `exec` and the `tmux_*` tools fail with the reason, ahead of any problem with their own arguments; `info` still works. So the client shows the problem, and a registry that starts the server with no flags can still list its tools.
+
 ### Pulling keys from a password manager (Bitwarden / 1Password / KeePassXC)
 
 Each of these can expose your SSH keys via `SSH_AUTH_SOCK`. Unlock the vault, confirm the agent is enabled, then run with `--agent=true` — the server never sees the private key.

@@ -1,6 +1,7 @@
-import { validateSession } from "@ssh-mcp/core"
+import { resolveAuth, validateSession } from "@ssh-mcp/core"
 import { type Either, Left, List, Option, Right, type Wire } from "functype"
 import { Platform } from "functype-os"
+import { type ConnectConfig } from "ssh2"
 
 export { resolveAuth, type ResolveAuthOptions } from "@ssh-mcp/core"
 
@@ -36,4 +37,27 @@ export const validateConfig = (config: ArgvConfig): Either<string, void> => {
   return errors.isEmpty
     ? Right<string, void>(undefined)
     : Left<string, void>(`Configuration error:\n${errors.toArray().join("\n")}`)
+}
+
+const isTrue = (v: string): boolean => v === "true" || v === "1" || v === "yes"
+
+/**
+ * The SSH connection the flags describe, or why there is none. Nothing connects here, so a server
+ * started without a reachable host still starts.
+ */
+export const resolveSshConfig = async (argv: ArgvConfig): Promise<Either<string, ConnectConfig>> => {
+  const valid = validateConfig(argv)
+  if (valid.isLeft()) return Left<string, ConnectConfig>(valid.value)
+  const auth = await resolveAuth({
+    password: Option(argv.password),
+    keyPath: Option(argv.key),
+    keyEnvVar: Option(argv["key-env"]),
+    useAgent: Option(argv.agent).map(isTrue).orElse(false),
+  })
+  return auth.map((a) => ({
+    host: argv.host,
+    port: Option(argv.port).map(Number).orElse(22),
+    username: effectiveUser(argv).orElse(""),
+    ...a,
+  }))
 }
