@@ -83,6 +83,9 @@ export const validateKey = (key: string): Either<string, string> =>
 // /usr/bin:/bin:/usr/sbin:/sbin and Homebrew's tmux (/opt/homebrew/bin, or /usr/local/bin on
 // Intel) isn't found. Appending keeps a tmux already on the host's PATH first. PATH is exported,
 // so the assignment reaches every tmux in the command.
+//
+// sshd runs the command with the account's login shell, so these commands need a POSIX one (sh,
+// bash, zsh, dash, ksh). csh, tcsh and fish reject the assignment before tmux runs.
 const TMUX_PATH = 'PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; '
 
 const withTmuxPath = (command: string): string => `${TMUX_PATH}${command}`
@@ -116,6 +119,15 @@ export const buildKeys = (session: string, keys: ReadonlyArray<string>): Either<
       : validateKey(bad)
   })
 
+const NON_POSIX_SHELL_MSG =
+  "the SSH account's login shell isn't POSIX-compatible (csh, tcsh or fish), so it can't parse tmux commands — set it to sh, bash or zsh, or use the exec tool instead"
+
+// csh and tcsh: "Bad : modifier in $ '/'." (seen on macOS). fish: "Unsupported use of '='" (its
+// documented wording for a bare assignment; not seen on a real fish).
+const NON_POSIX_SHELL_RE = /^Bad : modifier in \$|Unsupported use of '='/m
+
+const isNonPosixShell = (r: CommandResult): boolean => r.code !== 0 && NON_POSIX_SHELL_RE.test(r.stderr)
+
 const TMUX_MISSING_MSG =
   "tmux not found on the remote host — install tmux (e.g. apt/brew install tmux) or use the exec tool instead"
 
@@ -124,8 +136,10 @@ const TMUX_MISSING_MSG =
 const SESSION_MISSING_RE = /can't find session|can't find pane|session not found/i
 
 // No sessions: "no server running" when the socket is stale, and "error connecting to <socket>
-// (No such file or directory)" when it doesn't exist yet (tmux 3.4 on Linux, 3.7c on macOS).
-const NO_SERVER_RE = /no server running|error connecting to \S+ \(No such file or directory\)/i
+// (No such file or directory)" when it doesn't exist yet (tmux 3.4 on Linux, 3.7c on macOS). The path
+// can hold spaces, from TMUX_TMPDIR. tmux 3.7c printed that wording under de_DE and fr_FR locales on
+// macOS; a translated strerror on Linux is untested.
+const NO_SERVER_RE = /no server running|error connecting to .+ \(No such file or directory\)/i
 
 export const isTmuxMissing = (r: CommandResult): boolean =>
   r.code === 127 || /tmux: ([Cc]ommand )?not found/i.test(r.stderr)
@@ -134,10 +148,12 @@ const failure = (label: string, r: CommandResult): string =>
   r.timedOutMs === undefined ? `${label} failed: ${r.stderr.trim() || exitLabel(r)}` : `${label} ${exitLabel(r)}`
 
 // Each interpreter checks a timed-out result first, so its partial stderr can't read as "no server"
-// or "no session".
+// or "no session". A shell that can't parse the command comes next, before "tmux not found": fish
+// may exit 127 for it.
 
 export const interpretList = (r: CommandResult): Either<string, ReadonlyArray<string>> => {
   if (r.timedOutMs !== undefined) return Left<string, ReadonlyArray<string>>(failure("tmux list-sessions", r))
+  if (isNonPosixShell(r)) return Left<string, ReadonlyArray<string>>(NON_POSIX_SHELL_MSG)
   if (isTmuxMissing(r)) return Left<string, ReadonlyArray<string>>(TMUX_MISSING_MSG)
   if (r.code === 0) {
     return Right<string, ReadonlyArray<string>>(
@@ -155,6 +171,7 @@ export const interpretAck =
   (label: string) =>
   (r: CommandResult): Either<string, void> => {
     if (r.timedOutMs !== undefined) return Left<string, void>(failure(label, r))
+    if (isNonPosixShell(r)) return Left<string, void>(NON_POSIX_SHELL_MSG)
     if (isTmuxMissing(r)) return Left<string, void>(TMUX_MISSING_MSG)
     if (r.code === 0) return Right<string, void>(undefined)
     return Left<string, void>(failure(label, r))
@@ -164,6 +181,7 @@ export const interpretRead =
   (session: string) =>
   (r: CommandResult): Either<string, string> => {
     if (r.timedOutMs !== undefined) return Left<string, string>(failure("tmux capture-pane", r))
+    if (isNonPosixShell(r)) return Left<string, string>(NON_POSIX_SHELL_MSG)
     if (isTmuxMissing(r)) return Left<string, string>(TMUX_MISSING_MSG)
     if (r.code === 0) return Right<string, string>(trimTrailingWhitespace(r.stdout))
     if (SESSION_MISSING_RE.test(r.stderr)) {
@@ -176,6 +194,7 @@ export const interpretKeys =
   (session: string) =>
   (r: CommandResult): Either<string, void> => {
     if (r.timedOutMs !== undefined) return Left<string, void>(failure("tmux send-keys", r))
+    if (isNonPosixShell(r)) return Left<string, void>(NON_POSIX_SHELL_MSG)
     if (isTmuxMissing(r)) return Left<string, void>(TMUX_MISSING_MSG)
     if (r.code === 0) return Right<string, void>(undefined)
     if (SESSION_MISSING_RE.test(r.stderr)) {

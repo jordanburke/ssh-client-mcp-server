@@ -266,6 +266,17 @@ describe("interpretList", () => {
     }
   })
 
+  // Observed with tmux 3.7c on macOS, with TMUX_TMPDIR holding a space.
+  it("returns an empty list when the socket path has a space", () => {
+    const r = interpretList(
+      res({
+        code: 1,
+        stderr: "error connecting to /private/tmp/claude sp.Pb5Yft/tmux-501/default (No such file or directory)\n",
+      }),
+    )
+    expect(r.isRight() && r.value).toEqual([])
+  })
+
   it("still reports other connection errors", () => {
     const r = interpretList(res({ code: 1, stderr: "error connecting to /tmp/tmux-1000/default (Permission denied)" }))
     expect(r.isLeft()).toBe(true)
@@ -315,6 +326,39 @@ describe("interpretKeys", () => {
     const r = interpretKeys("ghost")(res({ code: 1, stderr: "can't find session: ghost" }))
     expect(r.isLeft()).toBe(true)
     if (r.isLeft()) expect(r.value).toContain('No tmux session "ghost"')
+  })
+})
+
+// csh and tcsh reject the PATH assignment every command starts with, before tmux runs. The stderr is
+// what /bin/tcsh and /bin/csh printed on macOS 27 for each of the four commands, with exit 1.
+describe("a login shell that isn't POSIX", () => {
+  const csh = res({ code: 1, stderr: "Bad : modifier in $ '/'.\n" })
+  // fish's wording for a bare assignment; not run against a real fish.
+  const fish = res({
+    code: 127,
+    stderr: "fish: Unsupported use of '='. In fish, please use 'set PATH \"$PATH:/opt/homebrew/bin\"'.\n",
+  })
+  const failures = (r: ReturnType<typeof res>) => [
+    interpretList(r),
+    interpretAck("tmux_send")(r),
+    interpretRead("agent")(r),
+    interpretKeys("agent")(r),
+  ]
+
+  it("says the shell is the problem, for every tmux tool", () => {
+    for (const r of [csh, fish])
+      for (const out of failures(r)) {
+        expect(out.isLeft()).toBe(true)
+        if (out.isLeft()) {
+          expect(out.value).toContain("login shell")
+          expect(out.value).not.toContain("tmux not found")
+        }
+      }
+  })
+
+  it("leaves a plain tmux-missing error alone", () => {
+    const r = interpretList(res({ code: 127, stderr: "bash: tmux: command not found" }))
+    expect(r.isLeft() && r.value).toContain("tmux not found")
   })
 })
 

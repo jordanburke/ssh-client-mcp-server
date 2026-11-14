@@ -71,6 +71,10 @@ For driving long-running interactive processes (e.g. a remote coding agent) acro
 - `tmux_read({ session?, lines? })` — return the recent pane transcript (`lines` default 200, max 2000).
 - `tmux_keys({ session?, keys })` — send control/special keys, e.g. `{ keys: ["C-c"] }`.
 
+The tmux tools find tmux on the host's `PATH`, then in `/opt/homebrew/bin` and `/usr/local/bin`. That covers Homebrew on macOS, where a command sent over SSH gets only `/usr/bin:/bin:/usr/sbin:/sbin`. `exec` gets no such help: to run other Homebrew tools through it, load Homebrew's `PATH` in the host's `~/.zshenv`.
+
+They need a POSIX login shell, such as sh, bash or zsh, for the SSH account: sshd runs each command with it, and csh, tcsh and fish can't parse the commands. On such an account the tools fail and say so; `exec` is unaffected.
+
 `session` defaults to `--tmux-session` (default `agent`). Tip: run agents in a line-oriented mode (not a full-screen TUI) so `tmux_read` returns a clean transcript.
 
 ## Installation
