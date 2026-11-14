@@ -74,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           prev=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^fleet-v' | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
-          echo "notes start at: ${prev:-(GitHub's choice)}"
+          echo "notes start at: ${prev:-(none, so GitHub picks)}"
           gh release create "$GITHUB_REF_NAME" --title "ssh-fleet-mcp-server $GITHUB_REF_NAME" --generate-notes --latest=false ${prev:+--notes-start-tag "$prev"}
 
       - name: Install MCP Publisher
