@@ -160,10 +160,14 @@ describe("resolveAuth", () => {
     if (result.isLeft()) expect(result.value).toContain("Invalid SSH key path")
   })
 
-  it("returns Left on missing key file", async () => {
-    const result = await resolveAuth(auth({ keyPath: Option(join(tmpDir, "nonexistent")) }))
+  it("returns Left on missing key file, naming the path once", async () => {
+    const missing = join(tmpDir, "nonexistent")
+    const result = await resolveAuth(auth({ keyPath: Option(missing) }))
     expect(result.isLeft()).toBe(true)
-    if (result.isLeft()) expect(result.value).toContain("Failed to read SSH key")
+    if (result.isLeft()) {
+      expect(result.value).toBe(`Failed to read SSH key: ENOENT: no such file or directory, open '${missing}'`)
+      expect(result.value.split(missing).length - 1).toBe(1)
+    }
   })
 
   it("returns empty config when no auth mode is selected", async () => {

@@ -10,6 +10,13 @@ export type ResolveAuthOptions = Readonly<{
   useAgent: boolean
 }>
 
+// The system error's own message names the path once ("ENOENT: no such file or directory, open
+// '/k'"), so it is used alone. Without a cause, fall back to the wrapped message and the path.
+const keyReadError = (path: string, err: Readonly<{ message: string; cause?: unknown }>): string =>
+  err.cause instanceof Error
+    ? `Failed to read SSH key: ${err.cause.message}`
+    : `Failed to read SSH key ${path}: ${err.message}`
+
 // Auth precedence: password → key file → key from env var → ssh-agent → empty.
 export const resolveAuth = async (options: ResolveAuthOptions): Promise<Either<string, Partial<ConnectConfig>>> => {
   if (options.password.isSome()) {
@@ -25,7 +32,7 @@ export const resolveAuth = async (options: ResolveAuthOptions): Promise<Either<s
     const expanded = expandResult.value
     const result = await Fs.readFile(expanded)
     return result.fold<Either<string, Partial<ConnectConfig>>>(
-      (err) => Left<string, Partial<ConnectConfig>>(`Failed to read SSH key ${expanded}: ${err.message}`),
+      (err) => Left<string, Partial<ConnectConfig>>(keyReadError(expanded, err)),
       (contents) => Right<string, Partial<ConnectConfig>>({ privateKey: contents }),
     )
   }
