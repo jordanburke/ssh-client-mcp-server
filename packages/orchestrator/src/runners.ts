@@ -25,7 +25,7 @@ import { Either, Left, Map, Option, Right, Set } from "functype"
 import { Path } from "functype-os"
 import { type ConnectConfig } from "ssh2"
 
-import { type CaEntry, type CaKeyRef, type Fleet, type HostEntry } from "./fleet.js"
+import { type CaEntry, type CaKeyRef, connectUser, type Fleet, type HostEntry } from "./fleet.js"
 import { type HostPolicy } from "./policy.js"
 
 export type FleetRunner = Readonly<{
@@ -158,7 +158,7 @@ export const selfTestCas = async (
 const sshConfigFor = (h: HostEntry): ConnectConfig => ({
   host: h.host,
   port: h.port,
-  username: h.user.orElse(process.env.USER ?? "root"),
+  username: connectUser(h),
 })
 
 const toSshConfig = async (h: HostEntry): Promise<Either<string, ConnectConfig>> => {
@@ -286,7 +286,9 @@ const makeRunner = (
         return result
       },
       (e: unknown) => {
-        if (names.has(host)) lastErrors.set(host, { message: (e as Error).message, at: new Date().toISOString() })
+        // A host whose auth failed at startup keeps that error's time: it fails the same way on every call.
+        if (names.has(host) && authErrorByName.get(host).isNone())
+          lastErrors.set(host, { message: (e as Error).message, at: new Date().toISOString() })
         return Promise.reject(e)
       },
     )

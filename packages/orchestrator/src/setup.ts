@@ -6,7 +6,7 @@ import { childEnv, type ProcessRunner } from "@ssh-mcp/core"
 import { Either, Left, type Map, Option, Right, Try } from "functype"
 import { Path } from "functype-os"
 
-import { type AuthKind, type CaEntry, type Fleet, type HostEntry, parseFleet } from "./fleet.js"
+import { type AuthKind, type CaEntry, connectUser, type Fleet, type HostEntry, parseFleet } from "./fleet.js"
 import { type FleetRunner, type HostError, type HostRow, hostRows } from "./runners.js"
 import { FLEET_TEMPLATE } from "./template.js"
 
@@ -152,11 +152,8 @@ export type SetupReport = Readonly<{
 export const enrollLine = (principal: string, publicKey: string): string =>
   `cert-authority,principals="${principal}" ${publicKey.trim()}`
 
-export const hostAddress = (h: HostEntry): string =>
-  h.user.fold(
-    () => `${h.host}:${h.port}`,
-    (u) => `${u}@${h.host}:${h.port}`,
-  )
+// Always names the account, the configured user or the default the connection uses.
+export const hostAddress = (h: HostEntry): string => `${connectUser(h)}@${h.host}:${h.port}`
 
 const KEY_SOURCE = { cmd: "key_cmd", env: "key_env", file: "key_file" } as const
 

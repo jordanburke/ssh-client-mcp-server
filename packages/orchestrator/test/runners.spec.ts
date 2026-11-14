@@ -255,6 +255,27 @@ agent = true
   })
 })
 
+describe("lastError timing", () => {
+  it("a host whose auth failed at startup keeps the startup time on later calls", async () => {
+    delete process.env.NOPE_KEY
+    const f = parseFleet(`[[hosts]]\nname = "x"\nhost = "1.2.3.4"\nkey_env = "NOPE_KEY"\n`).orThrow()
+    const r = (await buildFleetRunner(f, connect)).orThrow()
+    const at = r
+      .lastError("x")
+      .map((e) => e.at)
+      .orElse("")
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await expect(r.exec("x", "true", "unknown")).rejects.toThrow("NOPE_KEY")
+    expect(
+      r
+        .lastError("x")
+        .map((e) => e.at)
+        .orElse(""),
+    ).toBe(at)
+    await r.shutdown()
+  })
+})
+
 const caFleetToml = `
 [[cas]]
 name = "home"
@@ -317,6 +338,28 @@ const caWiring = (order: string[] = []) => {
 }
 
 describe("CA routing", () => {
+  it("a CA host's connect error is recorded under the host's name", async () => {
+    const { wiring } = caWiring()
+    const refusing: CaWiring = {
+      ...wiring,
+      openFor: (agent, host) => ({
+        ...wiring.openFor!(agent, host),
+        connect: async () => {
+          throw new Error("ssh: connect to host 10.0.0.11 port 22: Connection refused")
+        },
+      }),
+    }
+    const runner = (await buildFleetRunner(caFleet(), connect, Option(refusing))).orThrow()
+    await expect(runner.exec("box-a", "true", "claude")).rejects.toThrow("Connection refused")
+    expect(
+      runner
+        .lastError("box-a")
+        .map((e) => e.message)
+        .orElse(""),
+    ).toContain("Connection refused")
+    await runner.shutdown()
+  })
+
   beforeAll(() => {
     process.env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK ?? "/tmp/fake-agent.sock"
   })
