@@ -42,7 +42,7 @@ jobs:
       - name: Pack and check the package
         run: |
           mkdir -p "$RUNNER_TEMP/pack"
-          node ../../scripts/check-package.mjs . --tarball-out="$RUNNER_TEMP/pack" --host=127.0.0.1 --user=check --password=check
+          node ../../scripts/check-package.mjs . --tarball-out="$RUNNER_TEMP/pack"
 
       # The tarball that was just checked, from pnpm pack: it resolves workspace: versions, and
       # npm publish from this folder wouldn't.
