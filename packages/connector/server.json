@@ -6,12 +6,12 @@
     "url": "https://github.com/jordanburke/ssh-client-mcp-server",
     "source": "github"
   },
-  "version": "1.6.0",
+  "version": "1.6.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "ssh-client-mcp-server",
-      "version": "1.6.0",
+      "version": "1.6.1",
       "transport": {
         "type": "stdio"
       },
