@@ -35,7 +35,7 @@ async function main() {
   // that start the server with no flags (Glama) can still list its tools.
   const config = await resolveSshConfig(argv)
   config.fold(
-    (err) => console.error(`warning: ${err}\nEvery tool call fails until the flags are fixed.`),
+    (err) => console.error(`warning: ${err}\nexec and the tmux tools fail until the flags are fixed.`),
     () => undefined,
   )
 
@@ -76,13 +76,18 @@ async function main() {
   })
 
   const defaultSession = Option(argv["tmux-session"]).orElse("agent")
-  const tmuxRunner: TmuxRunner = (command) => execSshResult(sshConfig(), command)
+  // Built per call, before core validates a session name or key, so a bad server config is always
+  // the reason reported.
+  const tmuxRunner = (): TmuxRunner => {
+    const ssh = sshConfig()
+    return (command) => execSshResult(ssh, command)
+  }
 
   server.addTool({
     name: "tmux_list",
     description: "List live tmux sessions on the remote host. Returns a JSON array of session names.",
     parameters: z.object({}),
-    execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner))),
+    execute: async () => JSON.stringify(unwrap(await tmuxList(tmuxRunner()))),
   })
 
   server.addTool({
@@ -96,7 +101,7 @@ async function main() {
     }),
     execute: async ({ session, input, submit }) => {
       const target = session ?? defaultSession
-      unwrap(await tmuxSend(tmuxRunner, { session: target, input, submit: submit ?? true }))
+      unwrap(await tmuxSend(tmuxRunner(), { session: target, input, submit: submit ?? true }))
       return `Sent to tmux session "${target}".`
     },
   })
@@ -114,7 +119,7 @@ async function main() {
         .describe("Lines of scrollback to capture (default 200; capped at 2000)"),
     }),
     execute: async ({ session, lines }) =>
-      unwrap(await tmuxRead(tmuxRunner, { session: session ?? defaultSession, lines: lines ?? 200 })),
+      unwrap(await tmuxRead(tmuxRunner(), { session: session ?? defaultSession, lines: lines ?? 200 })),
   })
 
   server.addTool({
@@ -127,7 +132,7 @@ async function main() {
     }),
     execute: async ({ session, keys }) => {
       const target = session ?? defaultSession
-      unwrap(await tmuxKeys(tmuxRunner, { session: target, keys }))
+      unwrap(await tmuxKeys(tmuxRunner(), { session: target, keys }))
       return `Sent keys [${keys.join(", ")}] to tmux session "${target}".`
     },
   })
