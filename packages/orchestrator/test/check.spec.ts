@@ -7,7 +7,7 @@ import { Map } from "functype"
 import { describe, expect, it } from "vitest"
 
 import { createAuditor } from "../src/audit.js"
-import { checkRuntimeDir, readCheckConfig, runCheck } from "../src/check.js"
+import { checkRuntimeDir, probeFleetOf, readCheckConfig, runCheck } from "../src/check.js"
 import { parseFleet } from "../src/fleet.js"
 
 const ok: CommandResult = { stdout: "", stderr: "", code: 0 }
@@ -156,6 +156,15 @@ key = "/k"
     ])
   })
 
+  it("zero hosts says a CA's key_file is missing instead of staying silent", async () => {
+    const t = harness(`[[cas]]\nname = "a"\nkey_file = "/missing/ca-a"\n`, async () => ok, ["a"])
+    expect(await t.run()).toBe(0)
+    expect(t.out).toEqual([
+      "No hosts configured; add a [[hosts]] entry to /cfg/fleet.toml.",
+      "CA a: key_file missing: the server creates it on first start",
+    ])
+  })
+
   it("zero hosts exits 0", async () => {
     const t = harness("", async () => ok)
     expect(await t.run()).toBe(0)
@@ -181,5 +190,34 @@ describe("check setup", () => {
   it("the check runtime dir is separate", () => {
     expect(checkRuntimeDir("/run/user/1000/ssh-fleet")).toBe("/run/user/1000/ssh-fleet-check")
     expect(socketPathFor(checkRuntimeDir(`/${"x".repeat(60)}`), "unknown", "host").isLeft()).toBe(true)
+  })
+})
+
+describe("probeFleetOf", () => {
+  it("leaves out a CA whose key_file is missing, and its hosts", () => {
+    const fleet = parseFleet(`
+[[cas]]
+name = "a"
+key_file = "/missing/ca-a"
+[[cas]]
+name = "b"
+key_cmd = "op read b"
+[[hosts]]
+name = "ha"
+host = "h"
+ca = "a"
+[[hosts]]
+name = "hb"
+host = "h"
+ca = "b"
+[[hosts]]
+name = "pw"
+host = "h"
+key = "/k"
+`).orThrow()
+    const probe = probeFleetOf(fleet, ["a"])
+    expect(probe.cas.map((c) => c.name)).toEqual(["b"])
+    expect(probe.hosts.map((h) => h.name)).toEqual(["hb", "pw"])
+    expect(probeFleetOf(fleet, [])).toEqual(fleet)
   })
 })

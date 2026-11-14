@@ -12,7 +12,7 @@ import { z } from "zod"
 import { CLIENT_LABEL_ENV, clientLabel, createAuditor, openAuditLog, reportedClient } from "./audit.js"
 import { buildInfo } from "./build-info.js"
 import { caPublicKeys, type CaStart, startCa } from "./ca-start.js"
-import { readCheckConfig, runCheck } from "./check.js"
+import { probeFleetOf, readCheckConfig, runCheck } from "./check.js"
 import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
 import { makeHandlers } from "./handlers.js"
 import { buildFleetRunner, type CaWiring, type FleetRunner } from "./runners.js"
@@ -74,16 +74,12 @@ async function checkMain(): Promise<void> {
     ),
   )
   const missingKeyCas = missing.fold(fatal, (names) => names.flat())
-  // Probe only what can start: a CA with no key_file, and its hosts, are reported without a connection.
-  const probeFleet: Fleet = {
-    ...fleet,
-    cas: fleet.cas.filter((c) => !missingKeyCas.includes(c.name)),
-    hosts: fleet.hosts.filter((h) => !h.ca.exists((name) => missingKeyCas.includes(name))),
-  }
+  const probeFleet = probeFleetOf(fleet, missingKeyCas)
   const { wiring: ca } = await startCaOrExit(probeFleet, "check")
   const runner = await buildRunnerOrExit(probeFleet, ca)
   // A signal (`timeout 30 … check`, or Ctrl-C while a host is unreachable) still stops the check's
-  // own CA agent.
+  // own CA agent. One that arrives earlier, while custody starts or self-tests, isn't caught; the
+  // next start's recovery cleans up after it.
   const stopWith = (code: number) => () => void runner.shutdown().finally(() => process.exit(code))
   process.on("SIGINT", stopWith(130))
   process.on("SIGTERM", stopWith(143))

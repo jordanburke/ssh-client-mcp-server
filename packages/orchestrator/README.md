@@ -566,7 +566,7 @@ Two limits: enrolling a host needs root once, and only one server can run per `r
 ssh-fleet-mcp-server check [--config=<path>]
 ```
 
-Connects to every host from a terminal and runs `true`, printing one line per host as it finishes, then each CA's enrollment line, which it prints even when there are no hosts yet. Exits 0 when every host passes (or there are none), 1 otherwise. Each line names the account it connects as: the host's `user`, else the hub's `$USER`, else `root`.
+Connects to every host from a terminal and runs `true`, printing one line per host as it finishes, then a line per CA, even when there are no hosts yet: its enrollment line, or the hint that its `key_file` is missing. Exits 0 when every host passes (or there are none), 1 otherwise. Each line names the account it connects as: the host's `user`, else the hub's `$USER`, else `root`.
 
 ```
 ok    mini me@mini.local:22   password_env 212 ms
@@ -576,7 +576,7 @@ CA home: cert-authority,principals="fleet" ssh-ed25519 AAAA… ssh-fleet-ca-home
 
 - It never creates a config or key. A CA whose `key_file` is missing fails its hosts with a hint, without connecting.
 - It skips policy, so it can run `true` even on a `readonly` or `deny` host. Each probe is audited with `tool: "check"`, `agent: "operator"`, `bypass: "policy"`. It isn't reachable over MCP.
-- It uses its own runtime dir (`<runtime_dir>-check`), so it works while the server is running. Ctrl-C or `SIGTERM` (as from `timeout 30 ssh-fleet-mcp-server check`) stops its CA agent before it exits.
+- It uses its own runtime dir (`<runtime_dir>-check`), so it works while the server is running. Once the check has started probing hosts, Ctrl-C or `SIGTERM` (as from `timeout 30 ssh-fleet-mcp-server check`) stops its CA agent before it exits.
 - A `ForceCommand` account that doesn't allow `true` fails the check.
 - Run it with the same environment the MCP client gives the server, so `password_env` and `key_env` variables are set.
 

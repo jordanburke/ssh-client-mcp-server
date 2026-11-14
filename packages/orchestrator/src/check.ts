@@ -37,6 +37,16 @@ export const checkRuntimeDir = (runtimeDir: string): string => `${runtimeDir}-ch
 
 type Outcome = Readonly<{ ok: boolean; detail: string }>
 
+const MISSING_KEY_HINT = "key_file missing: the server creates it on first start"
+
+// What check connects to: a CA whose key_file is missing can't start, so it and its hosts are left
+// out, and runCheck reports them without a connection.
+export const probeFleetOf = (fleet: Fleet, missingKeyCas: ReadonlyArray<string>): Fleet => ({
+  ...fleet,
+  cas: fleet.cas.filter((c) => !missingKeyCas.includes(c.name)),
+  hosts: fleet.hosts.filter((h) => !h.ca.exists((name) => missingKeyCas.includes(name))),
+})
+
 const outcomeOf = (r: CommandResult, startedAt: number): Outcome =>
   r.code === 0
     ? { ok: true, detail: `${Date.now() - startedAt} ms` }
@@ -47,11 +57,13 @@ const outcomeOf = (r: CommandResult, startedAt: number): Outcome =>
 // bypass = "policy". Resolves to the process exit code.
 export const runCheck = async (deps: CheckDeps): Promise<number> => {
   const { fleet, out } = deps
+  // Each CA gets its line to paste, or says why it has none, even before any host uses it.
   const enrollLines = () =>
     fleet.cas.forEach((c) =>
-      deps.caPublicKeys.get(c.name).forEach((pub) => out(`CA ${c.name}: ${enrollLine(c.principal, pub)}`)),
+      deps.missingKeyCas.includes(c.name)
+        ? out(`CA ${c.name}: ${MISSING_KEY_HINT}`)
+        : deps.caPublicKeys.get(c.name).forEach((pub) => out(`CA ${c.name}: ${enrollLine(c.principal, pub)}`)),
     )
-  // A CA set up before any host still gets its line to paste.
   if (fleet.hosts.length === 0) {
     out(`No hosts configured; add a [[hosts]] entry to ${deps.configPath}.`)
     enrollLines()
@@ -69,8 +81,7 @@ export const runCheck = async (deps: CheckDeps): Promise<number> => {
     ].join(" ")
 
   const probe = async (h: HostEntry): Promise<Outcome> => {
-    if (h.ca.exists((name) => deps.missingKeyCas.includes(name)))
-      return { ok: false, detail: "key_file missing: the server creates it on first start" }
+    if (h.ca.exists((name) => deps.missingKeyCas.includes(name))) return { ok: false, detail: MISSING_KEY_HINT }
     const startedAt = Date.now()
     return deps.auditor
       .audited(

@@ -53,10 +53,12 @@ const expanded = (path: string): Either<string, string> =>
 
 const NO_CA: CaStart = { wiring: Option.none<CaWiring>(), created: [] }
 
-// When any [[cas]] entry exists (with or without hosts using it yet): check OpenSSH, check the runtime
-// dir, create any missing key_file, prepare known_hosts, and load every CA key into a private
-// ssh-agent. The checks that write nothing come first, so a failed start creates no key. `check`
-// creates nothing and uses its own runtime dir. A Left means startup must stop; no agent is left
+// When any [[cas]] entry exists (with or without hosts using it yet): check OpenSSH and the paths,
+// create any missing key_file, prepare known_hosts, and load every CA key into a private ssh-agent.
+// The checks that need no runtime dir come first, so a bad path or a missing OpenSSH creates no key.
+// Custody's own checks (the runtime dir's contents, hub.lock) run after key creation; a key made
+// before one of those fails is reused on the next start. `check` creates nothing and uses its own
+// runtime dir. A Left means startup must stop; no agent is left
 // running behind it.
 export const startCa = async (
   fleet: Fleet,
