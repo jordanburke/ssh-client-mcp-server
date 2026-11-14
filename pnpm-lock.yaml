@@ -204,11 +204,11 @@ importers:
   packages/connector:
     dependencies:
       functype:
-        specifier: ^1.26.0
-        version: 1.26.0
+        specifier: ^1.26.1
+        version: 1.26.1
       functype-os:
-        specifier: ^1.26.0
-        version: 1.26.0(functype@1.26.0)
+        specifier: ^1.26.1
+        version: 1.26.1(functype@1.26.1)
       somamcp:
         specifier: ^2.10.0
         version: 2.10.0
@@ -241,11 +241,11 @@ importers:
   packages/core:
     dependencies:
       functype:
-        specifier: ^1.26.0
-        version: 1.26.0
+        specifier: ^1.26.1
+        version: 1.26.1
       functype-os:
-        specifier: ^1.26.0
-        version: 1.26.0(functype@1.26.0)
+        specifier: ^1.26.1
+        version: 1.26.1(functype@1.26.1)
       somamcp:
         specifier: ^2.10.0
         version: 2.10.0
@@ -269,11 +269,11 @@ importers:
   packages/orchestrator:
     dependencies:
       functype:
-        specifier: ^1.26.0
-        version: 1.26.0
+        specifier: ^1.26.1
+        version: 1.26.1
       functype-os:
-        specifier: ^1.26.0
-        version: 1.26.0(functype@1.26.0)
+        specifier: ^1.26.1
+        version: 1.26.1(functype@1.26.1)
       smol-toml:
         specifier: ^1.9.1
         version: 1.9.1
@@ -1595,8 +1595,8 @@ packages:
     peerDependencies:
       functype: '>=0.60.0'
 
-  functype-os@1.26.0:
-    resolution: {integrity: sha512-Imv40Jyk86SXx383Q2/3Bmu3QggmetszHqLmJiL5spMNVyzVW6iUX1oLA6rMksfPvtoL9VQAFTJIMKMJ+MdQGw==}
+  functype-os@1.26.1:
+    resolution: {integrity: sha512-UayPZhGAEACKYzZ+7XBx4iOAnh6VEx3AXTafO+OOCw3bQT5iwT/1H43TFEAN8OtHYeX7BnUiQITNZ6903zJRhQ==}
     engines: {node: '>=18.17.0'}
     peerDependencies:
       functype: '>=0.60.0'
@@ -1605,8 +1605,8 @@ packages:
     resolution: {integrity: sha512-uc8nY0j4IJzoLgk8Y5OILaPw3CcEUcFtgHYQZfK4dYA5u0ZQWcCTKI2LRjiL4dvaVtLVYnLGzjiYcmSabVsC0g==}
     hasBin: true
 
-  functype@1.26.0:
-    resolution: {integrity: sha512-iRZL6OevKZQSv7ucswdPusutiFC0KS4er22WPb3UeJPRiHXfIRDBQi0zrqMqmtjtx+gQgiKhyORBKJW9zKwHzw==}
+  functype@1.26.1:
+    resolution: {integrity: sha512-9uFsIZZ5ngRjYgweWgmAqPTzLxqNon9mtyRfDYtupvVzTJf6Dzf8wwoPIowwIPJWHsKvMp4ctRCDM01Zowwd8A==}
     hasBin: true
 
   get-tsconfig@5.0.0-beta.6:
@@ -3180,22 +3180,22 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  functype-log@1.26.0(functype@1.26.0):
+  functype-log@1.26.0(functype@1.26.1):
     dependencies:
-      functype: 1.26.0
+      functype: 1.26.1
       loglayer: 9.4.0
 
   functype-os@1.16.0(functype@1.23.0):
     dependencies:
       functype: 1.23.0
 
-  functype-os@1.26.0(functype@1.26.0):
+  functype-os@1.26.1(functype@1.26.1):
     dependencies:
-      functype: 1.26.0
+      functype: 1.26.1
 
   functype@1.23.0: {}
 
-  functype@1.26.0: {}
+  functype@1.26.1: {}
 
   get-tsconfig@5.0.0-beta.6:
     dependencies:
@@ -3460,8 +3460,8 @@ snapshots:
       '@hono/node-server': 2.1.8(hono@4.13.18)
       '@modelcontextprotocol/client': 2.4.0
       '@modelcontextprotocol/server': 2.4.0
-      functype: 1.26.0
-      functype-log: 1.26.0(functype@1.26.0)
+      functype: 1.26.1
+      functype-log: 1.26.0(functype@1.26.1)
       hono: 4.13.18
       zod: 4.6.7
 

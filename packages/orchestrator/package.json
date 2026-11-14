@@ -63,8 +63,8 @@
   },
   "prettier": "ts-builds/prettier",
   "dependencies": {
-    "functype": "^1.26.0",
-    "functype-os": "^1.26.0",
+    "functype": "^1.26.1",
+    "functype-os": "^1.26.1",
     "smol-toml": "^1.9.1",
     "somamcp": "^2.10.0",
     "ssh2": "^1.17.0",
