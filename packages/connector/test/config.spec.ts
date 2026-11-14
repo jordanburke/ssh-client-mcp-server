@@ -170,6 +170,15 @@ describe("resolveAuth", () => {
     }
   })
 
+  it("returns Left on a key path that is a directory, naming the path once", async () => {
+    const result = await resolveAuth(auth({ keyPath: Option(tmpDir) }))
+    expect(result.isLeft()).toBe(true)
+    if (result.isLeft()) {
+      expect(result.value).toBe(`Failed to read SSH key ${tmpDir}: EISDIR: illegal operation on a directory, read`)
+      expect(result.value.split(tmpDir).length - 1).toBe(1)
+    }
+  })
+
   it("returns empty config when no auth mode is selected", async () => {
     const result = await resolveAuth(auth())
     expect(result.isRight()).toBe(true)
