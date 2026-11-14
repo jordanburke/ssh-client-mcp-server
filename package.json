@@ -16,8 +16,8 @@
     "check:package": "node scripts/check-package.mjs packages/orchestrator && node scripts/check-package.mjs packages/connector --host=127.0.0.1 --user=check --password=check"
   },
   "devDependencies": {
-    "ts-builds": "^4.0.0",
-    "tsdown": "^0.22.14",
+    "ts-builds": "^4.5.0",
+    "tsdown": "^0.23.7",
     "tsx": "^4.23.15"
   }
 }

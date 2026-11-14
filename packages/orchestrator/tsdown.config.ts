@@ -31,7 +31,7 @@ const stamp = {
 export default {
   ...tsdown,
   entry: ["src/index.ts"],
-  dts: { eager: true },
+  dts: { tsc: { eager: true } },
   define: { __FLEET_BUILD__: JSON.stringify(stamp) },
   deps: {
     ...tsdown.deps,
