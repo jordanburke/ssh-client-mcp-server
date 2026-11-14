@@ -224,6 +224,8 @@ List tmux sessions on a fleet host. Returns a JSON array of session names, empty
 
 The `tmux_*` tools find tmux on the host's `PATH`, then in `/opt/homebrew/bin` and `/usr/local/bin`. That covers Homebrew on macOS, where a command sent over SSH gets only `/usr/bin:/bin:/usr/sbin:/sbin`. `exec` gets no such help: to run other Homebrew tools through it, load Homebrew's `PATH` in the host's `~/.zshenv`.
 
+They need a POSIX login shell, such as sh, bash or zsh, for the SSH account: sshd runs each command with it, and csh, tcsh and fish can't parse the commands. On such an account the tools fail and say so; `exec` is unaffected.
+
 | Parameter | Type   | Required | Description           |
 | --------- | ------ | -------- | --------------------- |
 | `host`    | string | yes      | Configured host name. |
