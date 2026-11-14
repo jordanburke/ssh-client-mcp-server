@@ -1,6 +1,6 @@
 import { isIP } from "node:net"
 
-import { type ResolveAuthOptions, validateSession } from "@ssh-mcp/core"
+import { isValidCaName, type ResolveAuthOptions, validateSession } from "@ssh-mcp/core"
 import { type Either, Left, List, Option, Right, Try } from "functype"
 import { parse as parseToml } from "smol-toml"
 
@@ -23,6 +23,9 @@ export type HostEntry = Readonly<{
   ca: Option<string>
   principal: Option<string>
 }>
+
+// The account a host connects as: its `user`, else the hub's $USER, else root.
+export const connectUser = (h: Pick<HostEntry, "user">): string => h.user.orElse(process.env.USER ?? "root")
 
 export type AuthKind = "password_env" | "key" | "key_env" | "agent" | "ca"
 
@@ -187,6 +190,8 @@ const parseCa = (c: RawHost): Either<string, CaEntry> => {
   const name = str(c.name)
   if (name.isNone()) return Left<string, CaEntry>("[[cas]] entry has no name")
   const n = name.orElse("")
+  if (!isValidCaName(n))
+    return Left<string, CaEntry>(`ca "${n}": name must use only letters, digits, hyphen or underscore`)
   if (c.key !== undefined || c.private_key !== undefined)
     return Left<string, CaEntry>(`ca "${n}": keys must not be inline; use key_cmd, key_env or key_file`)
   const refs: ReadonlyArray<CaKeyRef> = [

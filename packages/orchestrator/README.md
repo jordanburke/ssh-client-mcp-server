@@ -350,14 +350,14 @@ user = "fleet-ro"
 ca = "home"
 ```
 
-| `[[cas]]` key    | Description                                                                                           |
-| ---------------- | ----------------------------------------------------------------------------------------------------- |
-| `name`           | Letters, digits, hyphen, underscore. Hosts refer to it with `ca = "<name>"`.                          |
-| `key_cmd`        | A shell command whose output is the CA private key (a keychain or password-manager read).             |
-| `key_env`        | An env var holding the CA private key; removed from the environment once read.                        |
-| `key_file`       | A key file: a regular file (not a symlink), mode `0600` or stricter, owned by the hub user.           |
-| `principal`      | The principal certificates name (default `"fleet"`). A host may override it with its own `principal`. |
-| `source_address` | An IPv4 or IPv6 CIDR; certificates are only accepted from those addresses.                            |
+| `[[cas]]` key    | Description                                                                                                 |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| `name`           | Letters, digits, hyphen, underscore, checked when the config loads. Hosts refer to it with `ca = "<name>"`. |
+| `key_cmd`        | A shell command whose output is the CA private key (a keychain or password-manager read).                   |
+| `key_env`        | An env var holding the CA private key; removed from the environment once read.                              |
+| `key_file`       | A key file: a regular file (not a symlink), mode `0600` or stricter, owned by the hub user.                 |
+| `principal`      | The principal certificates name (default `"fleet"`). A host may override it with its own `principal`.       |
+| `source_address` | An IPv4 or IPv6 CIDR; certificates are only accepted from those addresses.                                  |
 
 Exactly one of `key_cmd`, `key_env` or `key_file`. Inline keys are rejected.
 
@@ -566,7 +566,7 @@ Two limits: enrolling a host needs root once, and only one server can run per `r
 ssh-fleet-mcp-server check [--config=<path>]
 ```
 
-Connects to every host from a terminal and runs `true`, printing one line per host as it finishes, then each CA's enrollment line. Exits 0 when every host passes (or there are none), 1 otherwise.
+Connects to every host from a terminal and runs `true`, printing one line per host as it finishes, then each CA's enrollment line, which it prints even when there are no hosts yet. Exits 0 when every host passes (or there are none), 1 otherwise. Each line names the account it connects as: the host's `user`, else the hub's `$USER`, else `root`.
 
 ```
 ok    mini me@mini.local:22   password_env 212 ms
@@ -576,7 +576,7 @@ CA home: cert-authority,principals="fleet" ssh-ed25519 AAAA… ssh-fleet-ca-home
 
 - It never creates a config or key. A CA whose `key_file` is missing fails its hosts with a hint, without connecting.
 - It skips policy, so it can run `true` even on a `readonly` or `deny` host. Each probe is audited with `tool: "check"`, `agent: "operator"`, `bypass: "policy"`. It isn't reachable over MCP.
-- It uses its own runtime dir (`<runtime_dir>-check`), so it works while the server is running.
+- It uses its own runtime dir (`<runtime_dir>-check`), so it works while the server is running. Ctrl-C or `SIGTERM` (as from `timeout 30 ssh-fleet-mcp-server check`) stops its CA agent before it exits.
 - A `ForceCommand` account that doesn't allow `true` fails the check.
 - Run it with the same environment the MCP client gives the server, so `password_env` and `key_env` variables are set.
 

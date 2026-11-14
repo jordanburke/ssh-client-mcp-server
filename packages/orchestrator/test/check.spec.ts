@@ -12,7 +12,12 @@ import { parseFleet } from "../src/fleet.js"
 
 const ok: CommandResult = { stdout: "", stderr: "", code: 0 }
 
-const harness = (toml: string, exec: (host: string) => Promise<CommandResult>, missingKeyCas: string[] = []) => {
+const harness = (
+  toml: string,
+  exec: (host: string) => Promise<CommandResult>,
+  missingKeyCas: string[] = [],
+  caPublicKeys: Map<string, string> = Map.of<string, string>(),
+) => {
   const out: string[] = []
   const lines: string[] = []
   const calls: Array<{ host: string; command: string; agent: string }> = []
@@ -29,7 +34,7 @@ const harness = (toml: string, exec: (host: string) => Promise<CommandResult>, m
       },
       auditor,
       missingKeyCas,
-      caPublicKeys: Map.of<string, string>(),
+      caPublicKeys,
       out: (l) => out.push(l),
     })
   return { run, out, calls, audit: () => lines.map((l) => JSON.parse(l)) }
@@ -135,6 +140,20 @@ key = "/k"
       /^FAIL .*key_file missing: the server creates it on first start/,
     )
     expect(t.calls.map((c) => c.host).sort()).toEqual(["hb", "pw"])
+  })
+
+  it("zero hosts still prints each CA's line to paste", async () => {
+    const t = harness(
+      `[[cas]]\nname = "home"\nkey_cmd = "op read ca"\n`,
+      async () => ok,
+      [],
+      Map.of<string, string>(["home", "ssh-ed25519 AAAA ssh-fleet-ca-home"]),
+    )
+    expect(await t.run()).toBe(0)
+    expect(t.out).toEqual([
+      "No hosts configured; add a [[hosts]] entry to /cfg/fleet.toml.",
+      'CA home: cert-authority,principals="fleet" ssh-ed25519 AAAA ssh-fleet-ca-home',
+    ])
   })
 
   it("zero hosts exits 0", async () => {

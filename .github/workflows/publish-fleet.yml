@@ -65,11 +65,17 @@ jobs:
           echo "::error::$url never answered"
           exit 1
 
-      # Not marked latest: the repo's Latest release stays the connector's.
+      # Not marked latest: the repo's Latest release stays the connector's. The notes start at the
+      # previous fleet release; GitHub would otherwise start them at the newest release of either
+      # package. Its lookup uses the API, since checkout fetches no tags. This runs after the npm
+      # publish, so if the lookup fails the notes fall back to GitHub's choice instead of failing.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --title "ssh-fleet-mcp-server $GITHUB_REF_NAME" --generate-notes --latest=false
+        run: |
+          prev=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep '^fleet-v' | grep -vxF "$GITHUB_REF_NAME" | head -1 || true)
+          echo "notes start at: ${prev:-(GitHub's choice)}"
+          gh release create "$GITHUB_REF_NAME" --title "ssh-fleet-mcp-server $GITHUB_REF_NAME" --generate-notes --latest=false ${prev:+--notes-start-tag "$prev"}
 
       - name: Install MCP Publisher
         run: |

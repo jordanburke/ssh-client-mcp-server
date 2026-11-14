@@ -167,6 +167,10 @@ const release = (dir: string): void => {
 
 const VALID_CA_NAME = /^[\w-]+$/
 
+// A CA name becomes a file name in the runtime dir and a key comment, so it is letters, digits,
+// hyphen and underscore only. The fleet config checks it at parse time, before any key is created.
+export const isValidCaName = (name: string): boolean => VALID_CA_NAME.test(name)
+
 // Public keys the agent holds, one per line; empty when it holds none (ssh-add -L exits 1 then).
 const listKeys = async (agentSock: string, proc: ProcessRunner): Promise<ReadonlyArray<string>> => {
   const r = await proc.run("ssh-add", ["-L"], { env: childEnv({ SSH_AUTH_SOCK: agentSock }) })
@@ -182,7 +186,7 @@ const loadCa = async (
   const fail = (step: string, detail: string) =>
     Left<string, readonly [string, string]>(`CA "${ca.name}": ${step} failed: ${detail.trim()}`)
   // The name becomes a file name in the runtime dir.
-  if (!VALID_CA_NAME.test(ca.name)) return fail("naming", "use letters, digits, hyphen or underscore")
+  if (!isValidCaName(ca.name)) return fail("naming", "use letters, digits, hyphen or underscore")
   const key = await ca.key()
   if (key.isLeft()) return fail("reading the key", key.value)
   const agentEnv = childEnv({ ...NO_PROMPT, SSH_AUTH_SOCK: agentSock })

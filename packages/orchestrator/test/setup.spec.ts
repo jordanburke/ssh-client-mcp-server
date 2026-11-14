@@ -20,7 +20,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { type CaEntry, type CaKeyRef, parseFleet } from "../src/fleet.js"
 import { caKeySource, type FleetRunner, type HostError } from "../src/runners.js"
-import { ensureCaKeyFiles, ensureConfig, resolveConfigPath, type SetupContext, setupReport } from "../src/setup.js"
+import {
+  ensureCaKeyFiles,
+  ensureConfig,
+  hostAddress,
+  resolveConfigPath,
+  type SetupContext,
+  setupReport,
+} from "../src/setup.js"
 import { FLEET_TEMPLATE } from "../src/template.js"
 
 let home: string
@@ -398,5 +405,18 @@ key = "/k"
       [{ name: "a", state: "idle", inFlight: 0 }],
       [{ name: "b", state: "error", inFlight: 0, last_error: err }],
     ])
+  })
+})
+
+describe("hostAddress", () => {
+  const hostOf = (extra: string) =>
+    parseFleet(`[[hosts]]\nname = "box"\nhost = "box.local"\nagent = true\n${extra}`).orThrow().hosts[0]
+
+  it("names the configured user", () => {
+    expect(hostAddress(hostOf('user = "deploy"\nport = 2222\n'))).toBe("deploy@box.local:2222")
+  })
+
+  it("names the account the connection falls back to when user is unset", () => {
+    expect(hostAddress(hostOf(""))).toBe(`${process.env.USER ?? "root"}@box.local:22`)
   })
 })

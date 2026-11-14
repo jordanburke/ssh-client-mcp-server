@@ -47,8 +47,14 @@ const outcomeOf = (r: CommandResult, startedAt: number): Outcome =>
 // bypass = "policy". Resolves to the process exit code.
 export const runCheck = async (deps: CheckDeps): Promise<number> => {
   const { fleet, out } = deps
+  const enrollLines = () =>
+    fleet.cas.forEach((c) =>
+      deps.caPublicKeys.get(c.name).forEach((pub) => out(`CA ${c.name}: ${enrollLine(c.principal, pub)}`)),
+    )
+  // A CA set up before any host still gets its line to paste.
   if (fleet.hosts.length === 0) {
     out(`No hosts configured; add a [[hosts]] entry to ${deps.configPath}.`)
+    enrollLines()
     return 0
   }
   const width = Math.max(...fleet.hosts.map((h) => h.name.length))
@@ -86,8 +92,6 @@ export const runCheck = async (deps: CheckDeps): Promise<number> => {
       }),
     ),
   )
-  fleet.cas.forEach((c) =>
-    deps.caPublicKeys.get(c.name).forEach((pub) => out(`CA ${c.name}: ${enrollLine(c.principal, pub)}`)),
-  )
+  enrollLines()
   return outcomes.every((o) => o.ok) ? 0 : 1
 }

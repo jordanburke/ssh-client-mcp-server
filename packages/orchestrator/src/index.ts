@@ -1,32 +1,22 @@
 #!/usr/bin/env node
 
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
-import { dirname } from "node:path"
 
-import { checkOpenSsh, nodeProcessRunner, socketPathFor, startCaCustody } from "@ssh-mcp/core"
-import { Either, Left, Map, Option, Right, Try } from "functype"
-import { Path } from "functype-os"
+import { Either, Left, type Option, Right, Try } from "functype"
 import { createServer } from "somamcp/node"
 import { z } from "zod"
 
 import { CLIENT_LABEL_ENV, clientLabel, createAuditor, openAuditLog, reportedClient } from "./audit.js"
 import { buildInfo } from "./build-info.js"
-import { checkRuntimeDir, readCheckConfig, runCheck } from "./check.js"
+import { caPublicKeys, type CaStart, startCa } from "./ca-start.js"
+import { readCheckConfig, runCheck } from "./check.js"
 import { type Fleet, fleetWarnings, parseFleet } from "./fleet.js"
 import { makeHandlers } from "./handlers.js"
-import {
-  buildFleetRunner,
-  caKeySource,
-  type CaWiring,
-  defaultKnownHosts,
-  defaultRuntimeDir,
-  type FleetRunner,
-  selfTestCas,
-} from "./runners.js"
-import { ensureCaKeyFiles, ensureConfig, missingKeyFile, resolveConfigPath, type SetupContext } from "./setup.js"
+import { buildFleetRunner, type CaWiring, type FleetRunner } from "./runners.js"
+import { ensureConfig, missingKeyFile, resolveConfigPath, type SetupContext } from "./setup.js"
 
 const { version: pkgVersion } = createRequire(import.meta.url)("../package.json") as {
   version: `${number}.${number}.${number}`
@@ -35,51 +25,6 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
 const fatal = (msg: string): never => {
   console.error(msg)
   return process.exit(1)
-}
-
-const expanded = (path: string): string =>
-  Path.expand(path).fold(
-    (e) => fatal(`invalid path ${path}: ${e.message}`),
-    (p) => p,
-  )
-
-type CaStart = Readonly<{ wiring: Option<CaWiring>; created: ReadonlyArray<string> }>
-
-// When any [[cas]] entry exists (with or without hosts using it yet): check OpenSSH, create any missing
-// key_file, prepare the runtime dir and known_hosts, and load every CA key into a private ssh-agent.
-// Each failure stops startup. `check` creates nothing and uses its own runtime dir.
-const startCa = async (fleet: Fleet, mode: "serve" | "check"): Promise<CaStart> => {
-  if (fleet.cas.length === 0) return { wiring: Option.none<CaWiring>(), created: [] }
-  ;(await checkOpenSsh(nodeProcessRunner)).fold(fatal, () => undefined)
-  const created =
-    mode === "serve" ? (await ensureCaKeyFiles(fleet.cas, nodeProcessRunner)).fold(fatal, (names) => names) : []
-  fleet.cas
-    .filter((c) => created.includes(c.name))
-    .forEach((c) =>
-      console.error(
-        `created CA "${c.name}" key at ${c.key.kind === "file" ? c.key.path : ""}; add its line to each host (see fleet_setup)`,
-      ),
-    )
-  const configured = fleet.runtimeDir.map(expanded).orElse(defaultRuntimeDir())
-  const runtimeDir = mode === "check" ? checkRuntimeDir(configured) : configured
-  const knownHosts = fleet.knownHosts.map(expanded).orElse(defaultKnownHosts())
-  // Socket paths are fixed-length below runtimeDir, so one check covers every (agent, host).
-  socketPathFor(runtimeDir, "unknown", "host").fold(fatal, () => undefined)
-  mkdirSync(dirname(knownHosts), { recursive: true, mode: 0o700 })
-  const custody = (
-    await startCaCustody(
-      runtimeDir,
-      fleet.cas.map((c) => caKeySource(c)),
-      nodeProcessRunner,
-    )
-  ).fold(fatal, (c) => c)
-  // Mint and discard one certificate per CA: a CA that can't sign stops startup now, not every call.
-  const selfTest = await selfTestCas(custody, fleet.cas, nodeProcessRunner)
-  if (selfTest.isLeft()) {
-    await custody.shutdown()
-    fatal(selfTest.value)
-  }
-  return { wiring: Option<CaWiring>({ custody, proc: nodeProcessRunner, knownHosts }), created }
 }
 
 // Never leave a CA agent holding the key behind a failed start.
@@ -96,21 +41,17 @@ const buildRunnerOrExit = async (fleet: Fleet, ca: Option<CaWiring>): Promise<Fl
     (r) => Promise.resolve(r),
   )
 
-const caPublicKeysOf = (fleet: Fleet, ca: Option<CaWiring>): Map<string, string> =>
-  ca.fold(
-    () => Map.of<string, string>(),
-    (wiring) =>
-      Map.of(
-        ...fleet.cas.flatMap((c): Array<[string, string]> =>
-          wiring.custody
-            .pubPath(c.name)
-            .flatMap((path) => Try(() => readFileSync(path, "utf8")).toOption())
-            .fold(
-              () => [],
-              (pub) => [[c.name, pub.trim()]],
-            ),
-        ),
-      ),
+const startCaOrExit = async (fleet: Fleet, mode: "serve" | "check"): Promise<CaStart> =>
+  (await startCa(fleet, mode)).fold(fatal, (c) => c)
+
+// The runner owns the CA agent, so shutting it down before exiting leaves no key behind.
+const caPublicKeysOrExit = async (fleet: Fleet, ca: Option<CaWiring>, runner: FleetRunner) =>
+  caPublicKeys(fleet.cas, ca).fold(
+    async (msg) => {
+      await runner.shutdown()
+      return fatal(msg)
+    },
+    (keys) => Promise.resolve(keys),
   )
 
 const parseOrExit = (raw: string): Fleet => {
@@ -139,19 +80,27 @@ async function checkMain(): Promise<void> {
     cas: fleet.cas.filter((c) => !missingKeyCas.includes(c.name)),
     hosts: fleet.hosts.filter((h) => !h.ca.exists((name) => missingKeyCas.includes(name))),
   }
-  const { wiring: ca } = await startCa(probeFleet, "check")
+  const { wiring: ca } = await startCaOrExit(probeFleet, "check")
   const runner = await buildRunnerOrExit(probeFleet, ca)
+  // A signal (`timeout 30 … check`, or Ctrl-C while a host is unreachable) still stops the check's
+  // own CA agent.
+  const stopWith = (code: number) => () => void runner.shutdown().finally(() => process.exit(code))
+  process.on("SIGINT", stopWith(130))
+  process.on("SIGTERM", stopWith(143))
+  const publicKeys = await caPublicKeysOrExit(probeFleet, ca, runner)
   const code = await runCheck({
     fleet,
     configPath: path,
     runner,
     auditor: createAuditor({ sink, now: () => new Date(), newId: randomUUID }),
     missingKeyCas,
-    caPublicKeys: caPublicKeysOf(probeFleet, ca),
+    caPublicKeys: publicKeys,
     out: (line) => console.log(line),
   })
   await runner.shutdown()
-  process.exit(code)
+  // exitCode, not exit(): Node writes stdout to a pipe asynchronously on macOS, and exit() can drop
+  // the last lines.
+  process.exitCode = code
 }
 
 async function main(): Promise<void> {
@@ -177,8 +126,9 @@ async function main(): Promise<void> {
     (s) => s,
   )
 
-  const { wiring: ca, created: caCreated } = await startCa(fleet, "serve")
+  const { wiring: ca, created: caCreated } = await startCaOrExit(fleet, "serve")
   const runner = await buildRunnerOrExit(fleet, ca)
+  const publicKeys = await caPublicKeysOrExit(fleet, ca, runner)
   fleet.hosts.forEach((host) => runner.lastError(host.name).forEach((e) => console.error(`warning: ${e.message}`)))
 
   const setup: SetupContext = {
@@ -191,7 +141,7 @@ async function main(): Promise<void> {
         (e) => Left<string, string>(`Cannot read ${configPath}: ${e.message}`),
         (text) => Right<string, string>(text),
       ),
-    caPublicKeys: caPublicKeysOf(fleet, ca),
+    caPublicKeys: publicKeys,
     caCreated,
     runtimeDir: ca.map((wiring) => wiring.custody.runtimeDir),
     knownHosts: ca.map((wiring) => wiring.knownHosts),

@@ -167,6 +167,12 @@ ca = "home"
     expect(leftOf(`[[hosts]]\nname = "box-a"\nhost = "10.0.0.11"\n`)).toContain("key/key_env/agent/password_env/ca")
   })
 
+  it("rejects a CA name that can't be a file name, before any key is created", () => {
+    expect(leftOf(`[[cas]]\nname = "my ca"\nkey_file = "/keys/ca"\n`)).toContain(
+      'ca "my ca": name must use only letters, digits, hyphen or underscore',
+    )
+  })
+
   it("rejects a ca with no key reference", () => {
     expect(leftOf(`[[cas]]\nname = "home"\n` + caHost)).toContain(
       'ca "home": exactly one of key_cmd, key_env, key_file is required',
