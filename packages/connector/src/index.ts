@@ -76,8 +76,9 @@ async function main() {
   })
 
   const defaultSession = Option(argv["tmux-session"]).orElse("agent")
-  // Built per call, before core validates a session name or key, so a bad server config is always
-  // the reason reported.
+  // Built per call, before core validates a session name or key, so a bad server config is reported
+  // ahead of those. A call that fails the tool's input schema still gets the schema error, because the
+  // framework checks it before execute runs.
   const tmuxRunner = (): TmuxRunner => {
     const ssh = sshConfig()
     return (command) => execSshResult(ssh, command)

@@ -116,7 +116,7 @@ The server reads SSH connection info from CLI flags:
 
 \*Auth precedence is `--password` → `--key` → `--key-env` → `--agent`. If none are set the server starts but ssh2 will fail to authenticate on first `exec`.
 
-A missing `--host`, a bad flag, or a `--key` that can't be read doesn't stop the server either. It prints a warning on stderr, starts, and lists its tools. Until the flags are fixed, `exec` and the `tmux_*` tools fail with the reason, ahead of any problem with their own arguments; `info` still works. So the client shows the problem, and a registry that starts the server with no flags can still list its tools.
+A missing `--host`, a bad flag, or a `--key` that can't be read doesn't stop the server either. It prints a warning on stderr, starts, and lists its tools. Until the flags are fixed, `exec` and the `tmux_*` tools fail with the reason, ahead of a bad session name or key; `info` still works. A call that doesn't match the tool's input schema, such as `exec` with no `command`, still gets that error first. So the client shows the problem, and a registry that starts the server with no flags can still list its tools.
 
 ### Pulling keys from a password manager (Bitwarden / 1Password / KeePassXC)
 
