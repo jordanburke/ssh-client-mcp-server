@@ -30,9 +30,10 @@ const { version: pkgVersion } = createRequire(import.meta.url)("../package.json"
 async function main() {
   const argv = parseArgv(process.argv.slice(2))
 
-  // A bad config doesn't stop startup: the server starts and lists its tools, and each tool call
-  // fails with the reason. A client then shows the problem where the model sees it, and registries
-  // that start the server with no flags (Glama) can still list its tools.
+  // A config the startup check rejects doesn't stop the server: it starts and lists its tools, and
+  // exec and the tmux tools fail with the reason once a call passes its input schema. info still
+  // works. A client then shows the problem where the model sees it, and registries that start the
+  // server with no flags (Glama) can still list its tools.
   const config = await resolveSshConfig(argv)
   config.fold(
     (err) => console.error(`warning: ${err}\nexec and the tmux tools fail until the flags are fixed.`),
