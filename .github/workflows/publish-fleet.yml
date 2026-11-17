@@ -10,6 +10,7 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 40 # covers the wait for npm to serve the tarball
     permissions:
       contents: write
       id-token: write # OIDC for npm trusted publishing and MCP Registry login
@@ -22,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6.1.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -39,7 +40,7 @@ jobs:
         run: test "fleet-v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
       - name: Validate
-        run: pnpm validate
+        run: pnpm run ci
 
       - name: Pack and check the package
         run: |

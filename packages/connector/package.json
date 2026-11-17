@@ -51,6 +51,7 @@
   ],
   "scripts": {
     "validate": "ts-builds validate",
+    "ci": "ts-builds ci",
     "format": "ts-builds format",
     "format:check": "ts-builds format:check",
     "lint": "ts-builds lint",
@@ -64,7 +65,7 @@
     "dev": "ts-builds dev",
     "inspect": "pnpm build && npx @modelcontextprotocol/inspector dist/index.js",
     "check:versions": "tsx scripts/check-versions.ts",
-    "prepublishOnly": "pnpm check:versions && pnpm validate",
+    "prepublishOnly": "pnpm check:versions && pnpm run ci",
     "prepack": "node -e \"require('node:fs').copyFileSync('../../README.md', 'README.md')\""
   },
   "prettier": "ts-builds/prettier",
@@ -79,7 +80,7 @@
     "@ssh-mcp/core": "workspace:*",
     "@types/node": "^24.19.2",
     "@types/ssh2": "^1.15.6",
-    "ts-builds": "^4.5.0",
+    "ts-builds": "^4.7.0",
     "tsdown": "^0.23.7",
     "tsx": "^4.23.15"
   },
