@@ -13,12 +13,8 @@ publicHoistPattern:
 # First-party packages we publish/control — trusted, so skip the 24h release-age
 # wait (pnpm 11 minimumReleaseAge default is 1440 minutes).
 minimumReleaseAgeExclude:
+  - "*functype*"
   - ts-builds
-  - eslint-config-functype
-  - eslint-plugin-functype
-  - functype
-  - functype-log
-  - functype-os
   - somamcp
 
 # pnpm 11 strictDepBuilds: approve/decline dependency build scripts explicitly.

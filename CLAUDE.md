@@ -22,6 +22,7 @@ Each package delegates all tooling to [`ts-builds`](https://github.com/jordanbur
 
 - **Validate all**: `pnpm -r validate` - Full chain per package: format → lint → typecheck → test → build
 - **Per-package**: `cd packages/<name> && pnpm validate`
+- **CI**: `pnpm run ci` - The same chain per package, checking format and lint without fixing, as CI and `prepublishOnly` run it (type `run`: `pnpm ci` is a clean install)
 
 Within any package:
 
