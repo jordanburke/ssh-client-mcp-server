@@ -191,6 +191,7 @@ All tooling is delegated to [`ts-builds`](https://github.com/jordanburke/ts-buil
 
 ```bash
 pnpm validate      # format → lint → typecheck → test → build
+pnpm run ci        # validate's checks without fixing, as CI runs them (type `run`: `pnpm ci` is a clean install)
 pnpm test          # vitest run
 pnpm test:watch    # vitest watch mode
 pnpm build         # production build to dist/
