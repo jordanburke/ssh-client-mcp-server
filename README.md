@@ -208,3 +208,7 @@ Provided under the [MIT License](./LICENSE). Use at your own risk. Not affiliate
 ## Contributing
 
 Issues and PRs welcome at [jordanburke/ssh-client-mcp-server](https://github.com/jordanburke/ssh-client-mcp-server). Please run `pnpm validate` before submitting.
+
+---
+
+Maintained by [Jordan Burke](https://github.com/jordanburke) · **Affiliated with <a href="https://sapientsai.com/"><img src="https://sapientsai.com/images/logo.svg" alt="" width="20" style="vertical-align: middle;"> SapientsAI</a>**

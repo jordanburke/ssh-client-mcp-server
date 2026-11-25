@@ -599,3 +599,7 @@ pnpm build            # production build to dist/
 ```
 
 Integration tests (requiring a live SSH server on localhost) are automatically skipped when the host is not reachable — CI remains green in environments without SSH available.
+
+---
+
+Maintained by [Jordan Burke](https://github.com/jordanburke) · **Affiliated with <a href="https://sapientsai.com/"><img src="https://sapientsai.com/images/logo.svg" alt="" width="20" style="vertical-align: middle;"> SapientsAI</a>**
